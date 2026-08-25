@@ -394,4 +394,10 @@ def main(argv: list[str] | None = None) -> int:
 
 
 if __name__ == "__main__":
-    raise SystemExit(main())
+    try:
+        raise SystemExit(main())
+    except KeyboardInterrupt:
+        # Every decision was already appended and flushed, so nothing is lost.
+        # Exit quietly rather than dumping a traceback over the session summary.
+        print("\ninterrupted. progress is saved, rerun the same command to resume.")
+        raise SystemExit(130)
