@@ -216,3 +216,9 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+
+# tsalert runtime artifacts
+data/*.db
+data/*.db-wal
+data/*.db-shm
+logs/*.jsonl

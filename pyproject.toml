@@ -1,0 +1,25 @@
+[project]
+name = "tsalert"
+version = "0.1.0"
+description = "Monitors Truth Social posts for stock-related mentions and alerts on them"
+requires-python = ">=3.11"
+dependencies = [
+    "python-dotenv==1.0.1",
+    "curl_cffi==0.7.4",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest==8.3.4",
+]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["src"]
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+where = ["src"]
