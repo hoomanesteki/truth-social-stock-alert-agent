@@ -1,0 +1,300 @@
+from __future__ import annotations
+
+import re
+import time
+from dataclasses import dataclass
+
+from tsalert.detect.lexicon import Lexicon
+from tsalert.models import Detection, TickerMention
+
+URL_PATTERN = re.compile(r"https?://\S+")
+CASHTAG_PATTERN = re.compile(r"\$([A-Za-z]{1,5})\b")
+BARE_TICKER_PATTERN = re.compile(r"\b[A-Z]{1,5}\b")
+TOKEN_PATTERN = re.compile(r"[A-Za-z0-9']+")
+
+# ---------------------------------------------------------------------------
+# Two context vocabularies. This split is the central idea of the detector.
+#
+# The lexicon deliberately carries word-collision tickers (ALL, IT, NOW, GO,
+# TRUE, GOOD, ...). Trump's posts constantly mix financial and political
+# vocabulary: "market", "trade", "deal", "tariff", "jobs" show up in ordinary
+# political sentences about the economy in general, naming no company at
+# all. If a high ambiguity ticker match only had to clear that bar, almost
+# any campaign style post would trip it.
+#
+# So STRONG_CONTEXT holds words that, on this corpus, essentially only show
+# up when someone is actually talking about a security: "shares", "earnings",
+# "ticker", "NASDAQ". A high ambiguity match requires one of these nearby or
+# it is dropped outright.
+#
+# WEAK_CONTEXT holds words that sound financial but that Trump uses in a
+# political register just as often as a financial one ("the market is up",
+# "a great trade deal", "tariffs on Canada"). They are good enough to back a
+# medium ambiguity bare ticker, but not enough on their own for a high
+# ambiguity one, because gating high ambiguity matches on WEAK_CONTEXT alone
+# is exactly what would turn ALL, IT, NOW and friends into false positives
+# on this corpus.
+# ---------------------------------------------------------------------------
+
+STRONG_CONTEXT = (
+    "stock",
+    "stocks",
+    "shares",
+    "shareholder",
+    "shareholders",
+    "ticker",
+    "NASDAQ",
+    "NYSE",
+    "IPO",
+    "earnings",
+    "market cap",
+    "share price",
+    "valuation",
+    "dividend",
+    "trading at",
+    "premarket",
+    "after hours",
+    "short seller",
+    "buy the dip",
+    "all time high",
+    "S&P",
+    "Dow Jones",
+)
+
+WEAK_CONTEXT = (
+    "market",
+    "markets",
+    "trade",
+    "economy",
+    "economic",
+    "business",
+    "businesses",
+    "growth",
+    "deal",
+    "tariff",
+    "tariffs",
+    "jobs",
+    "money",
+    "dollars",
+    "billion",
+    "trillion",
+)
+
+
+def _phrase_pattern(terms) -> re.Pattern:
+    escaped = sorted((re.escape(t) for t in terms), key=len, reverse=True)
+    return re.compile(r"\b(?:" + "|".join(escaped) + r")\b", re.IGNORECASE)
+
+
+# "the stock market" is macro market language, not evidence about a specific
+# company (per the label definition, "the stock market is at an all time
+# high" is macro_market, not specific_equity). Without this exclusion,
+# "stock" being a STRONG_CONTEXT word would let "stock market" rubber stamp
+# an unrelated high ambiguity match nearby, for example ALL in "the stock
+# market is at an ALL TIME HIGH". "stock"/"stocks" keep counting as strong
+# context everywhere else ("Apple stock is way up").
+_STRONG_TERMS_EXCEPT_STOCK = tuple(t for t in STRONG_CONTEXT if t not in ("stock", "stocks"))
+_stock_alt = r"stocks?(?!\s+markets?\b)"
+_other_strong = sorted((re.escape(t) for t in _STRONG_TERMS_EXCEPT_STOCK), key=len, reverse=True)
+STRONG_PATTERN = re.compile(r"\b(?:" + "|".join([_stock_alt] + _other_strong) + r")\b", re.IGNORECASE)
+
+WEAK_PATTERN = _phrase_pattern(WEAK_CONTEXT)
+
+FOOD_CUES = ("pie", "tree", "orchard", "sauce", "juice")
+FOOD_PATTERN = _phrase_pattern(FOOD_CUES)
+
+# Trump signs off a large share of posts "President DJT" or the fuller
+# "President DONALD J. TRUMP". DJT is also his own initials, so either form
+# right after "President" is his signature, not a mention of Trump Media &
+# Technology Group stock. This is a real, frequent pattern in the archive.
+DJT_SIGNOFF_PATTERN = re.compile(r"\bPresident\s+(?:DJT|DONALD\s+J\.?\s+TRUMP)\b", re.IGNORECASE)
+
+
+@dataclass
+class _Candidate:
+    ticker: str
+    company: str
+    matched_text: str
+    method: str
+    confidence: float
+    start: int
+    end: int
+
+
+class RuleDetector:
+    """Lexicon and context baseline detector.
+
+    This is the baseline every ML arm gets compared against later, so it is
+    built to be a genuine, fair baseline rather than a strawman: it uses the
+    full lexicon, matches cashtags, aliases, company names and bare tickers,
+    and only requires context where the ambiguity of the match actually
+    calls for it.
+    """
+
+    def __init__(self, lexicon: Lexicon, context_window: int = 8, threshold: float = 0.5):
+        self.lexicon = lexicon
+        self.context_window = context_window
+        self.threshold = threshold
+
+    def detect(self, text: str, post_id: str = "") -> Detection:
+        start_time = time.perf_counter()
+
+        # Step 0: strip URLs first so nothing matches inside a link, for
+        # example a ticker-looking path segment like /statuses/TSLA.
+        clean_text = URL_PATTERN.sub(" ", text)
+        tokens = list(TOKEN_PATTERN.finditer(clean_text))
+
+        candidates: list[_Candidate] = []
+        candidates.extend(self._cashtag_candidates(clean_text))
+        candidates.extend(self._alias_candidates(clean_text, tokens))
+        candidates.extend(self._bare_ticker_candidates(clean_text, tokens))
+
+        candidates = self._apply_hard_suppressions(candidates, clean_text, tokens)
+
+        # Step 5: deduplicate by ticker, keep the highest confidence mention.
+        best: dict[str, _Candidate] = {}
+        for c in candidates:
+            existing = best.get(c.ticker)
+            if existing is None or c.confidence > existing.confidence:
+                best[c.ticker] = c
+
+        ordered = sorted(best.values(), key=lambda c: c.start)
+        mentions = tuple(
+            TickerMention(
+                ticker=c.ticker,
+                company=c.company,
+                matched_text=c.matched_text,
+                method=c.method,
+                confidence=c.confidence,
+            )
+            for c in ordered
+        )
+
+        # Step 6: is_stock_related if any surviving mention clears threshold.
+        is_stock_related = any(m.confidence >= self.threshold for m in mentions)
+        latency_ms = (time.perf_counter() - start_time) * 1000
+
+        return Detection(
+            post_id=post_id,
+            is_stock_related=is_stock_related,
+            mentions=mentions,
+            detector="rules",
+            latency_ms=latency_ms,
+        )
+
+    # -- step 1: cashtags -----------------------------------------------------
+
+    def _cashtag_candidates(self, clean_text: str) -> list[_Candidate]:
+        out: list[_Candidate] = []
+        for m in CASHTAG_PATTERN.finditer(clean_text):
+            ticker = m.group(1).upper()
+            entry = self.lexicon.get(ticker)
+            if entry is not None:
+                out.append(
+                    _Candidate(ticker, entry.company, m.group(0), "cashtag", 0.95, m.start(), m.end())
+                )
+            else:
+                # A cashtag naming a ticker outside our lexicon is still a
+                # stock mention. Dropping it would be a recall bug, so it is
+                # still emitted, just with an empty company and lower
+                # confidence since we cannot confirm it against anything.
+                out.append(_Candidate(ticker, "", m.group(0), "cashtag", 0.80, m.start(), m.end()))
+        return out
+
+    # -- step 2: aliases and company names -------------------------------------
+
+    def _alias_candidates(self, clean_text: str, tokens: list[re.Match]) -> list[_Candidate]:
+        out: list[_Candidate] = []
+        pattern = self.lexicon.alias_pattern()
+        for m in pattern.finditer(clean_text):
+            entry = self.lexicon.entry_for_alias(m.group(0))
+            if entry is None:
+                continue
+            if entry.ambiguity == "low":
+                conf = 0.85
+            elif entry.ambiguity == "medium":
+                conf = 0.70
+            else:  # high
+                window = self._context_window_text(clean_text, tokens, m.start(), m.end())
+                if not STRONG_PATTERN.search(window):
+                    continue
+                conf = 0.65
+            out.append(
+                _Candidate(entry.ticker, entry.company, m.group(0), "alias", conf, m.start(), m.end())
+            )
+        return out
+
+    # -- step 3: bare uppercase tickers -----------------------------------------
+
+    def _bare_ticker_candidates(self, clean_text: str, tokens: list[re.Match]) -> list[_Candidate]:
+        out: list[_Candidate] = []
+        for m in BARE_TICKER_PATTERN.finditer(clean_text):
+            token = m.group(0)
+            if token not in self.lexicon.tickers:
+                continue
+            entry = self.lexicon.get(token)
+            window = self._context_window_text(clean_text, tokens, m.start(), m.end())
+            if entry.ambiguity == "low":
+                conf = 0.70
+            elif entry.ambiguity == "medium":
+                if not (STRONG_PATTERN.search(window) or WEAK_PATTERN.search(window)):
+                    continue
+                conf = 0.60
+            else:  # high
+                if not STRONG_PATTERN.search(window):
+                    continue
+                conf = 0.50
+            out.append(_Candidate(entry.ticker, entry.company, token, "bare_ticker", conf, m.start(), m.end()))
+        return out
+
+    # -- step 4: hard suppression rules -----------------------------------------
+
+    def _apply_hard_suppressions(
+        self, candidates: list[_Candidate], clean_text: str, tokens: list[re.Match]
+    ) -> list[_Candidate]:
+        out: list[_Candidate] = []
+        for c in candidates:
+            if c.ticker == "DJT" and self._is_djt_signoff(clean_text, c.start, c.end):
+                continue
+            if c.ticker == "AAPL" and c.matched_text.strip().lower() == "apple":
+                if self._is_apple_food_cue(clean_text, tokens, c.start, c.end):
+                    continue
+            out.append(c)
+        return out
+
+    def _is_djt_signoff(self, clean_text: str, start: int, end: int) -> bool:
+        # His signature, not a ticker mention. See DJT_SIGNOFF_PATTERN above.
+        for m in DJT_SIGNOFF_PATTERN.finditer(clean_text):
+            if m.start() <= start and end <= m.end():
+                return True
+        return False
+
+    def _is_apple_food_cue(self, clean_text: str, tokens: list[re.Match], start: int, end: int) -> bool:
+        # "Apple" next to a food word (pie, tree, orchard, sauce, juice) with
+        # no strong equity context nearby is the fruit, not AAPL. AAPL is
+        # curated as low ambiguity, so without this rule "I had an Apple
+        # pie" would otherwise pass straight through.
+        window = self._context_window_text(clean_text, tokens, start, end)
+        if not FOOD_PATTERN.search(window):
+            return False
+        return not STRONG_PATTERN.search(window)
+
+    # -- context window ---------------------------------------------------------
+
+    def _context_window_text(
+        self, clean_text: str, tokens: list[re.Match], match_start: int, match_end: int
+    ) -> str:
+        # Tokens that overlap the match itself are excluded from the window,
+        # so a match can never supply its own supporting context. This is
+        # what keeps "all time high" from counting as context for its own
+        # ALL match in "the stock market is at an ALL TIME HIGH": the word
+        # "all" there is the match, not part of the surrounding evidence.
+        overlap = [i for i, tok in enumerate(tokens) if tok.start() < match_end and tok.end() > match_start]
+        if not overlap:
+            return ""
+        first_idx, last_idx = overlap[0], overlap[-1]
+        lo = max(0, first_idx - self.context_window)
+        hi = min(len(tokens) - 1, last_idx + self.context_window)
+        before = clean_text[tokens[lo].start() : match_start]
+        after = clean_text[match_end : tokens[hi].end()]
+        return f"{before} {after}"
