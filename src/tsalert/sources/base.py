@@ -26,6 +26,16 @@ class PermanentSourceError(SourceError):
     """404s, schema gone. Caller should not retry."""
 
 
+class BlockedSourceError(TransientSourceError):
+    """403/503 with a Cloudflare challenge in the body.
+
+    Kept distinct from a plain TransientSourceError so the circuit breaker's
+    log line and the ops alert can name the actual cause (blocked, not just
+    slow or overloaded) even though it is handled like any other transient
+    failure.
+    """
+
+
 class PostSource(Protocol):
     name: str
 

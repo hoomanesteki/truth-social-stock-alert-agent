@@ -26,3 +26,8 @@ def page2_statuses() -> list[dict]:
 @pytest.fixture
 def all_statuses(page1_statuses: list[dict], page2_statuses: list[dict]) -> list[dict]:
     return page1_statuses + page2_statuses
+
+
+@pytest.fixture
+def rss_feed_xml() -> str:
+    return (FIXTURES_DIR / "trumpstruth_feed.xml").read_text()

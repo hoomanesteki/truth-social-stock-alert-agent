@@ -19,6 +19,16 @@ class Post:
     has_media: bool
     source: str
     fetched_at: datetime
+    quoted_text: str = ""
+
+    @property
+    def detection_text(self) -> str:
+        # Keep text and quoted_text separate on the object (sentiment needs to
+        # tell "what he said" apart from "what he amplified"), but detection
+        # over a quote post needs both, since the post itself carries no words.
+        if not self.quoted_text:
+            return self.text
+        return f"{self.text}\n\n{self.quoted_text}"
 
     def to_dict(self) -> dict[str, Any]:
         d = asdict(self)

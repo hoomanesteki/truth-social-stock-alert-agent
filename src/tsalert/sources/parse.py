@@ -66,6 +66,12 @@ def parse_status(status: dict, source: str, fetched_at: datetime | None = None) 
     account = status.get("account") or {}
     account_name = account.get("username") or account.get("acct") or ""
 
+    # A quote post's own content is just a "RT: <url>" stub, with the actual
+    # quoted words living in a sibling `quote` dict. Without this, a quote
+    # post about a stock is a silent false negative in detection.
+    quote = status.get("quote")
+    quoted_text = html_to_text(quote.get("content") or "") if isinstance(quote, dict) else ""
+
     return Post(
         id=outer_id,
         account=account_name,
@@ -79,4 +85,5 @@ def parse_status(status: dict, source: str, fetched_at: datetime | None = None) 
         has_media=len(media) > 0,
         source=source,
         fetched_at=fetched_at,
+        quoted_text=quoted_text,
     )

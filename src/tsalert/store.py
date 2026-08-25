@@ -23,6 +23,7 @@ CREATE TABLE IF NOT EXISTS posts (
     has_media INTEGER,
     source TEXT,
     fetched_at TEXT,
+    quoted_text TEXT,
     detected_at TEXT,
     is_stock_related INTEGER,
     mentions_json TEXT
@@ -80,13 +81,21 @@ class Store:
     def init_schema(self) -> None:
         self._conn.execute("PRAGMA journal_mode=WAL")
         self._conn.executescript(SCHEMA_SQL)
+        self._migrate_add_quoted_text()
         self._conn.commit()
+
+    def _migrate_add_quoted_text(self) -> None:
+        # Dev DBs created by Break 1 predate the quoted_text column.
+        columns = {row[1] for row in self._conn.execute("PRAGMA table_info(posts)")}
+        if "quoted_text" not in columns:
+            self._conn.execute("ALTER TABLE posts ADD COLUMN quoted_text TEXT DEFAULT ''")
 
     def upsert_post(self, post: Post) -> bool:
         cur = self._conn.execute(
             "INSERT OR IGNORE INTO posts "
             "(id, account, created_at, text, url, raw_html, is_reply, is_repost, "
-            "is_quote, has_media, source, fetched_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            "is_quote, has_media, source, fetched_at, quoted_text) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
             (
                 post.id,
                 post.account,
@@ -100,6 +109,7 @@ class Store:
                 int(post.has_media),
                 post.source,
                 post.fetched_at.isoformat(),
+                post.quoted_text,
             ),
         )
         self._conn.commit()
@@ -208,4 +218,5 @@ class Store:
             has_media=bool(row["has_media"]),
             source=row["source"],
             fetched_at=parse_iso_datetime(row["fetched_at"]),
+            quoted_text=row["quoted_text"] or "",
         )
