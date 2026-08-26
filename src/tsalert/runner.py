@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import logging
 import time
+from datetime import datetime, timezone
 from typing import Any, Callable
 
 from tsalert.alerts.dispatcher import AlertDispatcher
@@ -71,6 +72,17 @@ class AgentRunner:
 
             detection = self.detector.detect(post.detection_text, post.id)
             self.store.save_detection(detection)
+            # Record ingestion latency for EVERY post, not just the ones that
+            # alert. Stock mentions are roughly two percent of posts, so waiting
+            # for a delivered alert to sample latency would take days. The
+            # publish to fetch stage is the one bounded by the poll interval and
+            # it dominates the total, so it is the number worth measuring.
+            self.store.record_latency(
+                post.id,
+                published_at=post.created_at.isoformat(),
+                fetched_at=post.fetched_at.isoformat(),
+                detected_at=datetime.now(timezone.utc).isoformat(),
+            )
             new_count += 1
             if detection.is_stock_related:
                 self.dispatcher.dispatch(post, detection)
