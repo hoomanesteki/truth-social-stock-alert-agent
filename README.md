@@ -144,12 +144,30 @@ one call shift the estimate by sixteen posts. Reported separately instead.
 Both false negatives are known limitations: S&P Global, whose symbol is not among the 95
 lexicon rows, and a bare CNBC link, since URLs are stripped before matching.
 
-**The LLM arm scored 1.000 on everything, and that is not evidence.** Ground truth here was
-produced by a language model, and it agreed with the LLM detector on 142 of 150 rows.
-Scoring a model against labels a similar model wrote is circular, and the blind holdout
-shows a zero gap for the same reason. A real baseline-versus-ML comparison needs human
-labels. That is the biggest weakness here, and I would rather say so than report a perfect
-score.
+**How the labels were made.** Two stages. `openai/gpt-oss-120b` proposes a label for every
+post, then a stronger model adjudicates each row against a written rubric covering the
+recurring hard cases: media brands he appears on versus companies as corporate entities,
+companies named in passing as an employer or donor, private companies, and the DJT sign-off.
+The adjudicator changed 8 of the 150 proposals.
+
+To check the labels are stable rather than one model's opinion, a third model from a
+different family, `openai/gpt-oss-safeguard-20b`, relabeled all 150 blind:
+
+| Check | Result |
+| --- | --- |
+| Agreement on stock-related | 149 / 150, 99.3% |
+| Disagreements | 1 |
+
+The single disagreement is the S&P Global post, where a company is cited as the source of a
+report rather than discussed as a business. That is a genuine judgement call and it is
+documented in the labeling notes.
+
+**The LLM arm scored 1.000, and that is still not evidence.** High agreement across three
+models shows the labels are consistent; it does not make them independent of the detector,
+because everything in that chain is a language model. Scoring a model against labels a
+similar model wrote is circular, and the blind holdout shows a zero gap for the same reason.
+A trustworthy baseline-versus-ML comparison needs human labels. That is the biggest weakness
+here, and I would rather say so than report a perfect score.
 
 **Latency**, over a 90 poll live run:
 
