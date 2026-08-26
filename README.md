@@ -153,6 +153,28 @@ makes the number checkable. The models differ by family on purpose: `gpt-oss-120
 precision, recall and F1 for both arms, with bootstrap intervals, since a bare F1 on a
 positive class this small is mostly noise.
 
+**Latency.** Measured over a 90 poll live run against the real account, with the interval
+floating between 60 and 180 seconds.
+
+| Stage | Measured |
+| --- | --- |
+| Published to fetched | 26s, 79s, 154s across three posts |
+| Fetched to detected | 7.4 ms |
+| Detected to delivered | 0.3 ms to the console sink |
+
+So end to end is the first row plus about eight milliseconds. Detection and delivery are
+not worth optimising; the poll interval is the entire budget, which is what makes the
+adaptive backoff a latency decision rather than a politeness one.
+
+One outlier is worth explaining rather than hiding. A fourth post measured 824 seconds,
+and it was the first poll after startup picking up something published thirteen minutes
+earlier. That is a cold start artifact, not steady state, and averaging it in would give a
+number that describes nothing. Three samples is also a small n, and the honest reason is
+that no stock related post happened to arrive during the window, so the end to end figure
+here is a decomposition rather than a single observed alert.
+
+A worked demo, including dedup holding across a restart, is in [docs/demo_log.md](docs/demo_log.md).
+
 ## 3. Robustness and ethics
 
 Everything rests on a TLS fingerprint continuing to work and those endpoints staying put.
