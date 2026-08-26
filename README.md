@@ -87,8 +87,12 @@ docker run --rm tsalert                                  # offline demo, no cred
 docker run --rm --env-file .env -v tsalert-data:/data tsalert run
 ```
 
-The volume matters: dedup and alert idempotency both live in the SQLite file, so without
-it a restarted container would re-alert on every post it had already seen.
+The volume matters: dedup and alert idempotency both live in the SQLite file, so without it
+a restarted container re-alerts every post it has already seen. Running twice against the
+same volume gives 4 alerts then 0; drop the volume and it is 4 again.
+
+The image is 261MB and the default command needs no network, so `docker run --rm
+--network none tsalert` is a complete offline demonstration.
 
 ---
 
