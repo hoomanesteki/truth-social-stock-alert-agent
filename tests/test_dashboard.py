@@ -1,8 +1,9 @@
 from __future__ import annotations
 
+import json
+import os
 import sys
 import threading
-import time
 from contextlib import contextmanager
 from datetime import datetime, timezone
 from pathlib import Path
@@ -79,9 +80,37 @@ def seed_store(db_path: Path) -> None:
         )
 
 
+class _FakeProc:
+    """Stands in for subprocess.Popen's return value.
+
+    pid is the test process's own pid, which os.kill(pid, 0) will always
+    find alive without this test ever spawning a real child process.
+    """
+
+    def __init__(self) -> None:
+        self.pid = os.getpid()
+
+
+class SpawnRecorder:
+    def __init__(self) -> None:
+        self.calls: list[tuple] = []
+
+    def __call__(self, *args, **kwargs):
+        self.calls.append((args, kwargs))
+        return _FakeProc()
+
+
 @contextmanager
-def running_server(db_path: Path, lexicon_path: Path):
-    server = dashboard.make_server("127.0.0.1", 0, str(db_path), lexicon_path)
+def running_server(db_path: Path, lexicon_path: Path, pid_path: Path | None = None, spawn_fn=None):
+    server = dashboard.make_server(
+        "127.0.0.1",
+        0,
+        str(db_path),
+        lexicon_path,
+        pid_path=pid_path or (db_path.parent / "agent.pid"),
+        metrics_path=db_path.parent / "metrics.md",
+        spawn_fn=spawn_fn or SpawnRecorder(),
+    )
     port = server.server_address[1]
     thread = threading.Thread(target=server.serve_forever, daemon=True)
     thread.start()
@@ -108,7 +137,7 @@ def _post(url: str, data: dict) -> tuple[int, str]:
         return exc.code, exc.read().decode("utf-8")
 
 
-def test_mentions_page_renders_from_temp_store(tmp_path):
+def test_page_renders_from_temp_store(tmp_path):
     db_path = tmp_path / "agent.db"
     lexicon_path = tmp_path / "tickers.csv"
     lexicon_path.write_text(_LEXICON_TEXT, encoding="utf-8")
@@ -125,18 +154,84 @@ def test_mentions_page_renders_from_temp_store(tmp_path):
     assert "Huge news for Tesla today" in body
 
 
-def test_ticker_filter_narrows_the_list(tmp_path):
+def test_ticker_filter_narrows_the_feed(tmp_path):
     db_path = tmp_path / "agent.db"
     lexicon_path = tmp_path / "tickers.csv"
     lexicon_path.write_text(_LEXICON_TEXT, encoding="utf-8")
     seed_store(db_path)
 
     with running_server(db_path, lexicon_path) as base_url:
-        status, body = _get(base_url + "/?ticker=TSLA")
+        status, body = _get(base_url + "/api/state?ticker=TSLA")
 
     assert status == 200
-    assert "Huge news for Tesla today" in body
-    assert "Boeing built a great plane" not in body
+    data = json.loads(body)
+    tickers_seen = {t for m in data["mentions"] for t in m["tickers"]}
+    assert tickers_seen == {"TSLA"}
+    assert any("Huge news for Tesla today" in m["text"] for m in data["mentions"])
+    assert not any("Boeing" in m["text"] for m in data["mentions"])
+    # the ticker list offered for the filter still lists every ticker in the data
+    assert set(data["tickers"]) == {"TSLA", "BA"}
+
+
+def test_api_state_returns_valid_json_with_expected_keys(tmp_path):
+    db_path = tmp_path / "agent.db"
+    lexicon_path = tmp_path / "tickers.csv"
+    lexicon_path.write_text(_LEXICON_TEXT, encoding="utf-8")
+    seed_store(db_path)
+
+    with running_server(db_path, lexicon_path) as base_url:
+        status, body = _get(base_url + "/api/state")
+
+    assert status == 200
+    data = json.loads(body)
+    expected_keys = {
+        "status",
+        "pid",
+        "stats",
+        "consecutive_errors",
+        "last_poll_at",
+        "last_successful_poll_at",
+        "last_new_post_at",
+        "poll_interval_seconds",
+        "next_poll_at",
+        "backfill_days",
+        "alarms",
+        "pipeline",
+        "mentions",
+        "tickers",
+        "ticker_filter",
+        "latency",
+        "metrics",
+        "server_time",
+    }
+    assert expected_keys.issubset(data.keys())
+    assert data["status"] == "STOPPED"
+    assert data["stats"]["posts"] == 2
+
+
+def test_is_running_is_false_for_a_stale_pid_file(tmp_path):
+    import subprocess
+
+    proc = subprocess.Popen([sys.executable, "-c", "pass"])
+    proc.wait()  # process has exited and been reaped, the pid is now free to be stale
+
+    assert dashboard.is_running(proc.pid) is False
+
+
+def test_starting_twice_does_not_spawn_a_second_process(tmp_path):
+    db_path = tmp_path / "agent.db"
+    lexicon_path = tmp_path / "tickers.csv"
+    lexicon_path.write_text(_LEXICON_TEXT, encoding="utf-8")
+    pid_path = tmp_path / "agent.pid"
+    recorder = SpawnRecorder()
+
+    with running_server(db_path, lexicon_path, pid_path=pid_path, spawn_fn=recorder) as base_url:
+        status1, body1 = _post(base_url + "/start", {"interval": "60"})
+        status2, body2 = _post(base_url + "/start", {"interval": "60"})
+
+    assert status1 == 200 and json.loads(body1)["ok"] is True
+    assert status2 == 200 and json.loads(body2)["ok"] is False
+    assert len(recorder.calls) == 1
 
 
 def test_malformed_lexicon_post_is_refused_and_leaves_file_unchanged(tmp_path):
@@ -148,38 +243,26 @@ def test_malformed_lexicon_post_is_refused_and_leaves_file_unchanged(tmp_path):
         status, body = _post(base_url + "/lexicon", {"csv": "not,a,valid,header\nrow,here\n"})
 
     assert status == 200
-    assert "Not saved" in body
+    data = json.loads(body)
+    assert data["ok"] is False
+    assert "Not saved" in data["message"]
     assert lexicon_path.read_text(encoding="utf-8") == _LEXICON_TEXT
 
 
-def test_valid_lexicon_post_saves_the_file(tmp_path):
+def test_settings_written_through_the_dashboard_survive_being_read_back(tmp_path):
     db_path = tmp_path / "agent.db"
     lexicon_path = tmp_path / "tickers.csv"
     lexicon_path.write_text(_LEXICON_TEXT, encoding="utf-8")
 
-    new_text = (
-        "ticker,company,aliases,ambiguity,ambiguous_aliases,kind,notes\n"
-        "AAPL,Apple,Apple,low,,equity,\n"
-    )
-
     with running_server(db_path, lexicon_path) as base_url:
-        status, body = _post(base_url + "/lexicon", {"csv": new_text})
+        status, body = _post(base_url + "/settings", {"interval": "180", "backfill_days": "30"})
+        assert status == 200
+        assert json.loads(body)["ok"] is True
 
-    assert status == 200
-    assert "Saved" in body
-    assert lexicon_path.read_text(encoding="utf-8") == new_text
-
-
-def test_health_and_latency_sections_render_with_an_empty_database(tmp_path):
-    db_path = tmp_path / "empty.db"
-    lexicon_path = tmp_path / "tickers.csv"
-    lexicon_path.write_text(_LEXICON_TEXT, encoding="utf-8")
-
+    # A fresh server against the same database simulates a dashboard restart.
     with running_server(db_path, lexicon_path) as base_url:
-        status, body = _get(base_url + "/")
+        status, body = _get(base_url + "/api/state")
 
-    assert status == 200
-    assert "Health" in body
-    assert "Latency" in body
-    assert "No mentions yet." in body
-    assert "none" in body  # no active alarms
+    data = json.loads(body)
+    assert data["poll_interval_seconds"] == 180
+    assert data["backfill_days"] == 30

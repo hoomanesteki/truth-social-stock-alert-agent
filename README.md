@@ -44,10 +44,23 @@ uv run pytest -q                   # full suite, offline
 uv run python scripts/dashboard.py --port 8000 --db data/agent.db
 ```
 
-A read only view of mentions, health, latency and store counts, plus a lexicon editor
-and a backfill trigger, built on `http.server` with no new dependency. It is local only,
-binds to 127.0.0.1 by default, and has no authentication, so it must never be exposed to
-a network.
+A control room for the agent, not just a read only view. One page, built on `http.server`
+with no new dependency: a status hero (running, stopped or degraded, with live figures and
+a countdown to the next poll), start and stop buttons, poll interval presets with a plain
+English guidance line computed from the value you pick, a backfill trigger with a time and
+page estimate before you run it, a fetched to alerted pipeline funnel, a ticker filterable
+mentions feed, health and latency (reusing `latency_report.py`'s own maths), precision,
+recall and F1 read from `data/eval/metrics.md` when it exists, and the ticker lexicon
+editor. The page renders once, then a small script polls `GET /api/state` every 10 seconds
+and updates in place, so nothing you are mid way through typing gets wiped by a refresh.
+
+`is_running()` checks the recorded pid with `os.kill(pid, 0)` rather than trusting the pid
+file, so a stale file left behind by a crash is reported as stopped instead of lying that
+the agent is still running. Settings you change (poll interval, backfill window) are saved
+to the store and survive a restart of the dashboard itself.
+
+It is local only, binds to 127.0.0.1 by default, and has no authentication, so it must
+never be exposed to a network.
 
 Reproducing the data and evaluation:
 
