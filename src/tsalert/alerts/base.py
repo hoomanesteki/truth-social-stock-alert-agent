@@ -5,6 +5,7 @@ from datetime import datetime, timezone
 from typing import Protocol
 
 from tsalert.models import Detection, Post
+from tsalert.sentiment import Sentiment
 
 _MAX_TEXT_CHARS = 3000
 _TRUNCATED_MARKER = " [truncated]"
@@ -40,7 +41,7 @@ def _truncate(text: str) -> str:
     return text[:_MAX_TEXT_CHARS] + _TRUNCATED_MARKER
 
 
-def format_alert(post: Post, detection: Detection) -> str:
+def format_alert(post: Post, detection: Detection, sentiment: Sentiment | None = None) -> str:
     tickers = ", ".join(m.ticker for m in detection.mentions)
     companies = ", ".join(m.company for m in detection.mentions)
     # Report the strongest match's confidence, since that is the one that
@@ -50,11 +51,17 @@ def format_alert(post: Post, detection: Detection) -> str:
     # ran on. A quote post can carry no words of its own, so using post.text
     # here would deliver an alert whose entire body is the bare RT link.
     body = _truncate(post.detection_text)
+    # Empty string when there is no sentiment, so the layout below is byte
+    # identical to before sentiment existed.
+    sentiment_line = ""
+    if sentiment is not None:
+        sentiment_line = f"sentiment: {sentiment.label} ({sentiment.confidence:.2f}) {sentiment.rationale}\n"
     return (
         f"STOCK MENTION: {tickers}\n"
         f"companies: {companies}\n"
         f"posted: {_format_timestamp(post.created_at)}\n"
         f"detected: {detection.detector} (confidence {confidence:.2f})\n"
+        f"{sentiment_line}"
         f"\n"
         f"{body}\n"
         f"\n"

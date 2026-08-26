@@ -1,15 +1,18 @@
 from __future__ import annotations
 
 import json
+import logging
 import random
 import time
 from datetime import datetime, timezone
-from typing import Callable
+from typing import Any, Callable
 
 from tsalert.alerts.base import AlertChannel, DeliveryResult, format_alert, format_ops_alert
 from tsalert.models import Detection, Post, TickerMention
 from tsalert.sources.base import PermanentSourceError, TransientSourceError
 from tsalert.store import Store
+
+logger = logging.getLogger(__name__)
 
 _MAX_BACKOFF_SECONDS = 30.0
 _BACKOFF_JITTER = 0.2
@@ -26,19 +29,21 @@ class AlertDispatcher:
         channels: list[AlertChannel],
         store: Store,
         max_attempts: int = 4,
+        sentiment_scorer: Any = None,
         base_delay: float = 2.0,
         sleep: Callable[[float], None] = time.sleep,
     ) -> None:
         self.channels = channels
         self.store = store
         self.max_attempts = max_attempts
+        self.sentiment_scorer = sentiment_scorer
         self.base_delay = base_delay
         self.sleep = sleep
         self._rng = random.Random()
 
     def dispatch(self, post: Post, detection: Detection) -> list[DeliveryResult]:
         detected_at = datetime.now(timezone.utc)
-        text = format_alert(post, detection)
+        text = self._format(post, detection)
         results = []
         for channel in self.channels:
             if not channel.is_configured():
@@ -97,7 +102,7 @@ class AlertDispatcher:
             if loaded is None:
                 continue
             post, detection = loaded
-            text = format_alert(post, detection)
+            text = self._format(post, detection)
             detected_at = datetime.now(timezone.utc)
             results.append(self._send_and_record(post, channel, text, detected_at))
         return results
@@ -125,6 +130,23 @@ class AlertDispatcher:
                 post, detection = loaded
                 results.extend(self.dispatch(post, detection))
         return results
+
+
+    def _format(self, post: Post, detection: Detection) -> str:
+        """Render an alert, adding sentiment when a scorer is configured.
+
+        Scoring calls a remote model, so a failure here must not cost us the
+        alert. Losing the annotation is survivable, losing the alert is not.
+        """
+        sentiment = None
+        if self.sentiment_scorer is not None:
+            try:
+                sentiment = self.sentiment_scorer.score(
+                    post.detection_text, [m.ticker for m in detection.mentions]
+                )
+            except Exception as exc:
+                logger.warning("sentiment scoring failed, sending without it: %s", exc)
+        return format_alert(post, detection, sentiment=sentiment)
 
     # -- internals -----------------------------------------------------
 

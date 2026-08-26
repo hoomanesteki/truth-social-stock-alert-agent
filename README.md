@@ -19,7 +19,7 @@ console.
 | Variable | Needed for |
 | --- | --- |
 | `TELEGRAM_BOT_TOKEN`, `TELEGRAM_CHAT_ID` | Telegram delivery. Get the token from @BotFather, then message your bot once and read the numeric chat id from `https://api.telegram.org/bot<TOKEN>/getUpdates` |
-| `GROQ_API_KEY` | The LLM detector arm and the labeling helper |
+| `GROQ_API_KEY` | The LLM detector arm, the labeling helper, and the bonus sentiment line (bullish/bearish/neutral) added to delivered alerts |
 
 ## Running
 
@@ -37,6 +37,17 @@ uv run python agent.py health      # heartbeat state and active alarms
 uv run python agent.py stats       # store counts
 uv run pytest -q                   # full suite, offline
 ```
+
+### Dashboard
+
+```bash
+uv run python scripts/dashboard.py --port 8000 --db data/agent.db
+```
+
+A read only view of mentions, health, latency and store counts, plus a lexicon editor
+and a backfill trigger, built on `http.server` with no new dependency. It is local only,
+binds to 127.0.0.1 by default, and has no authentication, so it must never be exposed to
+a network.
 
 Reproducing the data and evaluation:
 
@@ -239,7 +250,9 @@ src/tsalert/
   reliability.py          retries, adaptive interval, circuit breaker
   runner.py monitor.py    the poll loop and health signals
   llm.py                  Groq client with an on-disk cache
-scripts/                  backfill, eval set construction, labeling, evaluation, latency
+  sentiment.py             bonus: bullish/bearish/neutral scoring for delivered alerts
+scripts/                  backfill, eval set construction, labeling, evaluation, latency,
+                          dashboard (bonus: local read only http.server dashboard)
 data/                     the 45 day archive, the lexicon, the evaluation set
 tests/                    140 tests, offline, against recorded fixtures
 ```

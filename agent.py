@@ -2,11 +2,13 @@ from __future__ import annotations
 
 import argparse
 import dataclasses
+import logging
 import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent / "src"))
 
+from tsalert.alerts.base import format_alert
 from tsalert.alerts.console import ConsoleChannel
 from tsalert.alerts.dispatcher import AlertDispatcher
 from tsalert.alerts.telegram import TelegramChannel
@@ -20,11 +22,14 @@ from tsalert.logging_setup import setup_logging
 from tsalert.monitor import HealthMonitor
 from tsalert.reliability import AdaptiveInterval
 from tsalert.runner import AgentRunner
+from tsalert.sentiment import Sentiment, SentimentScorer
 from tsalert.sources.failover import FailoverSource
 from tsalert.sources.fixture import FixtureSource
 from tsalert.sources.rss_mirror import TrumpsTruthRssSource
 from tsalert.sources.truthsocial import TruthSocialApiSource
 from tsalert.store import Store
+
+logger = logging.getLogger(__name__)
 
 _REPO_ROOT = Path(__file__).resolve().parent
 _LEXICON_PATH = _REPO_ROOT / "data" / "lexicon" / "tickers.csv"
@@ -154,6 +159,19 @@ def build_detector(config: Config, detector_name: str | None = None):
     return CombinedDetector(rules, llm)
 
 
+def build_sentiment_scorer(config: Config) -> SentimentScorer | None:
+    if not config.groq_api_key:
+        return None
+    client = GroqClient(
+        api_key=config.groq_api_key,
+        model=config.groq_model or _DEFAULT_LLM_MODEL,
+        cache_path=_LLM_CACHE_PATH,
+    )
+    return SentimentScorer(client)
+
+
+
+
 def print_active_channels(channels: list) -> None:
     names = ", ".join(c.name for c in channels)
     print(f"Active channels: {names}")
@@ -178,10 +196,12 @@ def cmd_run(args: argparse.Namespace, config: Config) -> int:
         print(str(exc), file=sys.stderr)
         return 2
 
+    scorer = build_sentiment_scorer(config)
+
     with Store(config.db_path) as store:
         source = build_source(source_name, config)
         channels = build_channels(config)
-        dispatcher = AlertDispatcher(channels, store)
+        dispatcher = AlertDispatcher(channels, store, sentiment_scorer=scorer)
         monitor = HealthMonitor(
             store,
             stale_minutes=config.heartbeat_stale_minutes,
@@ -207,7 +227,7 @@ def cmd_test_alert(args: argparse.Namespace, config: Config) -> int:
     with Store(config.db_path) as store:
         channels = build_channels(config)
         print_active_channels(channels)
-        dispatcher = AlertDispatcher(channels, store)
+        dispatcher = AlertDispatcher(channels, store, sentiment_scorer=scorer)
         results = dispatcher.dispatch_ops(
             "test_alert", "This is a test alert sent from the command line."
         )
