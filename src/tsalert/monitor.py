@@ -24,7 +24,7 @@ class HealthAlarm:
 class HealthMonitor:
     """Watches for the agent going quiet without ever looking broken.
 
-    A crash is loud and easy to notice. The dangerous failure here is the
+    Crashes are easy to spot. The one that hurts is the
     opposite: polls keep succeeding, parsing keeps succeeding, and no new
     post ever shows up because the endpoint changed shape or started
     returning an empty page. no_new_posts is the alarm built for that case.

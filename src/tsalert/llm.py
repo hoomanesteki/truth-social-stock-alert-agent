@@ -201,7 +201,7 @@ class GroqClient:
 
     @staticmethod
     def _extract_content(data: dict) -> dict:
-        # data is the outer chat-completion response, not the model's
+        # data here is the outer chat-completion envelope. The model's
         # answer. Missing structure here means the API contract changed,
         # not that the model produced a bad answer, so this is never
         # retried, it is raised straight out of complete_json.

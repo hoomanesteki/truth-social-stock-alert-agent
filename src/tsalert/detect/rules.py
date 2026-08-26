@@ -86,7 +86,7 @@ def _phrase_pattern(terms) -> re.Pattern:
     return re.compile(r"\b(?:" + "|".join(escaped) + r")\b", re.IGNORECASE)
 
 
-# "the stock market" is macro market language, not evidence about a specific
+# "the stock market" is macro language. It says nothing about a specific
 # company (per the label definition, "the stock market is at an all time
 # high" is macro_market, not specific_equity). Without this exclusion,
 # "stock" being a STRONG_CONTEXT word would let "stock market" rubber stamp
@@ -105,13 +105,13 @@ FOOD_PATTERN = _phrase_pattern(FOOD_CUES)
 
 # Trump signs off a large share of posts "President DJT" or the fuller
 # "President DONALD J. TRUMP". DJT is also his own initials, so either form
-# right after "President" is his signature, not a mention of Trump Media &
+# right after "President" is how he signs off. Nothing to do with Trump Media &
 # Technology Group stock. This is a real, frequent pattern in the archive.
 DJT_SIGNOFF_PATTERN = re.compile(r"\bPresident\s+(?:DJT|DONALD\s+J\.?\s+TRUMP)\b", re.IGNORECASE)
 
 # Same idea as the Apple food cue above, generalized to a handful of tickers
 # whose company alias is also an everyday word for the news or intelligence
-# senses of that word, not the company. Suppressed only when a cue is
+# senses of that word rather than the company. Suppressed only when a cue is
 # nearby and no STRONG_CONTEXT term backs up an actual equity mention, so
 # "ABC News tonight" stays quiet while "Disney stock is up" still fires.
 SUPPRESSION_CUES: dict[str, tuple[str, ...]] = {
@@ -303,7 +303,7 @@ class RuleDetector:
         return out
 
     def _is_djt_signoff(self, clean_text: str, start: int, end: int) -> bool:
-        # His signature, not a ticker mention. See DJT_SIGNOFF_PATTERN above.
+        # Sign-off again. See DJT_SIGNOFF_PATTERN above.
         for m in DJT_SIGNOFF_PATTERN.finditer(clean_text):
             if m.start() <= start and end <= m.end():
                 return True
@@ -311,7 +311,7 @@ class RuleDetector:
 
     def _is_apple_food_cue(self, clean_text: str, tokens: list[re.Match], start: int, end: int) -> bool:
         # "Apple" next to a food word (pie, tree, orchard, sauce, juice) with
-        # no strong equity context nearby is the fruit, not AAPL. AAPL is
+        # no strong equity context nearby is the fruit. AAPL is
         # curated as low ambiguity, so without this rule "I had an Apple
         # pie" would otherwise pass straight through.
         window = self._context_window_text(clean_text, tokens, start, end)
@@ -336,7 +336,7 @@ class RuleDetector:
         # so a match can never supply its own supporting context. This is
         # what keeps "all time high" from counting as context for its own
         # ALL match in "the stock market is at an ALL TIME HIGH": the word
-        # "all" there is the match, not part of the surrounding evidence.
+        # "all" there is the match itself, so it cannot also count as evidence.
         overlap = [i for i, tok in enumerate(tokens) if tok.start() < match_end and tok.end() > match_start]
         if not overlap:
             return ""

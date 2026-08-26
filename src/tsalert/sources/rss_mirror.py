@@ -1,6 +1,6 @@
 """Fallback source: the trumpstruth.org RSS mirror.
 
-This is a degraded mode, not an equal alternative to the primary API. The
+Treat this as a fallback only. It is not interchangeable with the API. The
 feed gives us post text and the truth-social id, but it does not carry
 repost/quote/media structure (those fields are always reported False here),
 and it lags behind the live source by some amount. truth:originalId is in

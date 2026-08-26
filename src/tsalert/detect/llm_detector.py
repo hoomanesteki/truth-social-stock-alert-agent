@@ -43,7 +43,7 @@ class LlmDetector:
         # left to propagate. Turning a network failure into a quiet
         # negative Detection would look identical to "no stock mentioned",
         # and an alerting agent that reads a failure that way goes silent
-        # without anyone noticing. CombinedDetector, not this class, is the
+        # without anyone noticing. CombinedDetector is the
         # layer that decides what to do when the LLM is unavailable.
         label = self.client.complete_json(SYSTEM_PROMPT, user_message, max_tokens=4000)
         self._validate(label)
@@ -92,7 +92,7 @@ class LlmDetector:
                     company=company,
                     matched_text=ticker,
                     method="llm",
-                    # The prompt only asks for a yes/no verdict, not a
+                    # The prompt asks for a yes/no verdict and never for a
                     # probability, so every mention the model reports for a
                     # stock-related post gets the same fixed confidence.
                     confidence=0.9,

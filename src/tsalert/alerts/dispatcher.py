@@ -50,7 +50,7 @@ class AlertDispatcher:
                 continue
             # claim_alert is the idempotency gate: the row it inserts
             # survives a process restart because it lives in the sqlite
-            # file, not in memory. A second dispatch for the same post and
+            # file rather than in memory. A second dispatch for the same post and
             # channel finds the row already there and skips silently.
             if not self.store.claim_alert(post.id, channel.name):
                 continue

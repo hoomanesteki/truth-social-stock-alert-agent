@@ -83,7 +83,7 @@ class AgentRunner:
 
                 detection = self.detector.detect(post.detection_text, post.id)
                 self.store.save_detection(detection)
-                # Record ingestion latency for EVERY post, not just the ones that
+                # Stamp latency on every post that arrives. Only stamping the ones that
                 # alert. Stock mentions are roughly two percent of posts, so waiting
                 # for a delivered alert to sample latency would take days. The
                 # publish to fetch stage is the one bounded by the poll interval and
@@ -126,7 +126,7 @@ class AgentRunner:
                 new_count = self.poll_once()
                 iterations += 1
                 total_new += new_count
-                # Always say what happened. A silent agent that is working looks
+                # Print every poll. Otherwise there is no way to tell a working agent
                 # identical to a broken one, which makes a demo impossible to read.
                 print(
                     f"poll {iterations}: {new_count} new post(s), "
