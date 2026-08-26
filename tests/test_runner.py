@@ -1,10 +1,13 @@
 from __future__ import annotations
 
 import json
+from datetime import datetime, timezone
 from pathlib import Path
 
+from tsalert.alerts.dispatcher import AlertDispatcher
 from tsalert.detect.lexicon import Lexicon
 from tsalert.detect.rules import RuleDetector
+from tsalert.models import Detection, Post, TickerMention
 from tsalert.monitor import HealthMonitor
 from tsalert.reliability import AdaptiveInterval
 from tsalert.runner import AgentRunner
@@ -23,6 +26,18 @@ LEXICON_PATH = Path(__file__).resolve().parent.parent / "data" / "lexicon" / "ti
 # dispatched" test needs, using the real detector rather than a stub.
 DEMO_IDS = {status["id"] for status in json.loads(DEMO_FIXTURE.read_text())}
 
+# Four of the eight demo posts name a company the detector should report. The other
+# four mention a company word in a non company sense (Intel as intelligence, ABC News
+# and Fox News as broadcasters he is appearing on or criticising, New York Times as a
+# bestseller list) and are deliberately suppressed. Listing the ids here rather than
+# asking the detector keeps the assertion meaningful instead of tautological.
+DEMO_STOCK_IDS = {
+    "116994500400281844",  # NVIDIA building in America
+    "117031897808226413",  # Chevron CEO interview
+    "117074526504264990",  # a list of corporate donors
+    "117085013643913800",  # Walmart named as a former employer
+}
+
 
 def no_sleep(_seconds: float) -> None:
     pass
@@ -35,9 +50,14 @@ class FakeDispatcher:
         self.dispatched: list[tuple] = []
         self.ops: list[tuple[str, str]] = []
         self.retry_failed_calls = 0
+        self.recover_undelivered_calls = 0
 
     def retry_failed(self):
         self.retry_failed_calls += 1
+        return []
+
+    def recover_undelivered(self):
+        self.recover_undelivered_calls += 1
         return []
 
     def dispatch(self, post, detection):
@@ -87,6 +107,70 @@ class MergingSource:
         return []
 
 
+class EmptySource:
+    """A source with nothing new to fetch, ever. Isolates the recovery pass
+    from any fresh-post handling in poll_once.
+    """
+
+    def __init__(self) -> None:
+        self.name = "empty"
+
+    def fetch_latest(self, since_id=None, limit: int = 20):
+        return []
+
+    def fetch_history(self, before_id=None, limit: int = 20):
+        return []
+
+
+class FixedPagesSource:
+    """Returns one scripted page of posts per fetch_latest call, ignoring
+    since_id entirely. Used to feed poll_once a non numeric id without a
+    real source's own id handling getting in the way.
+    """
+
+    def __init__(self, pages: list[list[Post]]) -> None:
+        self.name = "fixed"
+        self._pages = list(pages)
+
+    def fetch_latest(self, since_id=None, limit: int = 20):
+        return self._pages.pop(0) if self._pages else []
+
+    def fetch_history(self, before_id=None, limit: int = 20):
+        return []
+
+
+class RecordingChannel:
+    """A real AlertChannel that always succeeds and records what it sent."""
+
+    def __init__(self, name: str = "console") -> None:
+        self.name = name
+        self.sent: list[str] = []
+
+    def is_configured(self) -> bool:
+        return True
+
+    def send(self, text: str) -> None:
+        self.sent.append(text)
+
+
+def make_plain_post(post_id: str, text: str = "some post text") -> Post:
+    now = datetime(2026, 8, 25, 18, 0, 0, tzinfo=timezone.utc)
+    return Post(
+        id=post_id,
+        account="realDonaldTrump",
+        created_at=now,
+        text=text,
+        url=f"https://truthsocial.com/@realDonaldTrump/{post_id}",
+        raw_html=f"<p>{text}</p>",
+        is_reply=False,
+        is_repost=False,
+        is_quote=False,
+        has_media=False,
+        source="fixture",
+        fetched_at=now,
+    )
+
+
 class CountingSource:
     """Wraps a real source and counts fetch_latest calls."""
 
@@ -134,7 +218,7 @@ def test_poll_once_processes_only_new_posts(tmp_path):
     new_count = runner.poll_once()
 
     assert new_count == len(DEMO_IDS)
-    assert len(dispatcher.dispatched) == len(DEMO_IDS)
+    assert len(dispatcher.dispatched) == len(DEMO_STOCK_IDS)
     store.close()
 
 
@@ -149,7 +233,7 @@ def test_poll_once_twice_over_same_data_dispatches_nothing_second_time(tmp_path)
 
     assert first_count == len(DEMO_IDS)
     assert second_count == 0
-    assert len(dispatcher.dispatched) == len(DEMO_IDS)  # unchanged by the second poll
+    assert len(dispatcher.dispatched) == len(DEMO_STOCK_IDS)  # unchanged by the second poll
     store.close()
 
 
@@ -164,10 +248,10 @@ def test_only_stock_related_posts_are_dispatched(tmp_path):
     new_count = runner.poll_once()
 
     assert new_count == total_pages  # every post is new and gets processed
-    assert len(dispatcher.dispatched) == len(DEMO_IDS)  # only the stock related ones dispatch
+    assert len(dispatcher.dispatched) == len(DEMO_STOCK_IDS)  # only the stock related ones dispatch
 
     dispatched_ids = {post.id for post, _detection in dispatcher.dispatched}
-    assert dispatched_ids == DEMO_IDS
+    assert dispatched_ids == DEMO_STOCK_IDS
     assert all(detection.is_stock_related for _post, detection in dispatcher.dispatched)
     store.close()
 
@@ -241,6 +325,63 @@ def test_last_seen_post_id_advances_and_is_persisted(tmp_path):
     reopened_store.init_schema()
     assert reopened_store.get_state("last_seen_post_id") == max_id
     reopened_store.close()
+
+
+def test_alert_with_no_alerts_row_is_recovered_and_delivered_on_next_poll(tmp_path):
+    """Reproduces defect 1 variant b: a crash before dispatch is ever
+    reached. The post is stored and detected as stock related, but no
+    alerts row exists at all, because nothing revisits it once upsert_post
+    stops returning is_new. Recovery must find and deliver it on the very
+    next poll_once, with no fresh post arriving from the source.
+    """
+    store = make_store(tmp_path)
+    post = make_plain_post("999")
+    store.upsert_post(post)
+    mention = TickerMention(
+        ticker="DJT", company="Trump Media", matched_text="$DJT", method="cashtag", confidence=0.9
+    )
+    store.save_detection(
+        Detection(post_id=post.id, is_stock_related=True, mentions=(mention,), detector="rules", latency_ms=1.0)
+    )
+    row = store._conn.execute("SELECT COUNT(*) FROM alerts WHERE post_id=?", (post.id,)).fetchone()
+    assert row[0] == 0  # simulating the crash: dedup knows the post, delivery has no record of it
+
+    channel = RecordingChannel("console")
+    dispatcher = AlertDispatcher([channel], store, sleep=no_sleep)
+    runner = make_runner(EmptySource(), dispatcher, store)
+
+    new_count = runner.poll_once()
+
+    assert new_count == 0  # the source had nothing new, recovery is the only thing that ran
+    assert len(channel.sent) == 1
+    delivered = store._conn.execute(
+        "SELECT status FROM alerts WHERE post_id=? AND channel='console'", (post.id,)
+    ).fetchone()
+    assert delivered["status"] == "delivered"
+    store.close()
+
+
+def test_non_numeric_post_id_does_not_crash_and_does_not_poison_next_poll(tmp_path):
+    store = make_store(tmp_path)
+    source = FixedPagesSource(
+        [
+            [make_plain_post("abcguid-not-numeric")],
+            [make_plain_post("500")],
+        ]
+    )
+    dispatcher = FakeDispatcher()
+    runner = make_runner(source, dispatcher, store)
+
+    first = runner.poll_once()
+    assert first == 1
+    assert store.get_state("last_seen_post_id") == "abcguid-not-numeric"
+
+    # The original defect: the second poll's `int(post.id) > int(last_id)`
+    # comparison raised ValueError on the non numeric last_id and killed
+    # the process. It must not raise here, and the poll must complete.
+    second = runner.poll_once()
+    assert second == 1
+    store.close()
 
 
 def test_run_with_max_iterations_performs_exactly_that_many_polls(tmp_path):

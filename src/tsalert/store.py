@@ -85,7 +85,7 @@ class Store:
         self._conn.commit()
 
     def _migrate_add_quoted_text(self) -> None:
-        # Dev DBs created by Break 1 predate the quoted_text column.
+        # Databases created before quoted_text existed are still around locally.
         columns = {row[1] for row in self._conn.execute("PRAGMA table_info(posts)")}
         if "quoted_text" not in columns:
             self._conn.execute("ALTER TABLE posts ADD COLUMN quoted_text TEXT DEFAULT ''")
@@ -139,14 +139,19 @@ class Store:
         return cur.rowcount > 0
 
     def record_alert_result(
-        self, post_id: str, channel: str, status: str, error: str | None = None
+        self,
+        post_id: str,
+        channel: str,
+        status: str,
+        error: str | None = None,
+        attempts_made: int = 1,
     ) -> None:
         now = datetime.now(timezone.utc).isoformat()
         delivered_at = now if status == "delivered" else None
         self._conn.execute(
-            "UPDATE alerts SET status=?, attempts=attempts+1, "
+            "UPDATE alerts SET status=?, attempts=attempts+?, "
             "delivered_at=COALESCE(?, delivered_at), last_error=? WHERE post_id=? AND channel=?",
-            (status, delivered_at, error, post_id, channel),
+            (status, attempts_made, delivered_at, error, post_id, channel),
         )
         self._conn.commit()
 
@@ -174,13 +179,46 @@ class Store:
             self._conn.execute(f"UPDATE latency SET {columns} WHERE post_id=?", values)
         self._conn.commit()
 
-    def failed_alerts(self, max_attempts: int) -> list[tuple[str, str]]:
-        """Alerts that failed but have attempts left, as (post_id, channel)."""
+    def retryable_alerts(self, max_attempts: int) -> list[tuple[str, str]]:
+        """Alerts worth retrying, as (post_id, channel).
+
+        Covers both 'failed' (every attempt in a dispatch() call was used up)
+        and 'pending' (claim_alert inserted the row but the process crashed
+        before record_alert_result ever ran). A 'pending' row is not a sign
+        delivery is still in flight, since nothing else in this codebase can
+        be mid-send concurrently: it is a stuck claim, and stuck is exactly
+        what retrying is for.
+        """
         rows = self._conn.execute(
-            "SELECT post_id, channel FROM alerts WHERE status='failed' AND attempts < ?",
+            "SELECT post_id, channel FROM alerts "
+            "WHERE status IN ('failed', 'pending') AND attempts < ?",
             (max_attempts,),
         ).fetchall()
         return [(row["post_id"], row["channel"]) for row in rows]
+
+    def undelivered_stock_posts(self, channel: str, limit: int = 50) -> list[str]:
+        """Stock related post ids with no alerts row at all for this channel.
+
+        dedup and delivery are separate concerns on separate schedules.
+        upsert_post answers "have I seen this post before", which is
+        permanent and global: once a post row exists it never goes away and
+        is never revisited by dedup. claim_alert/record_alert_result answer
+        "have I delivered this alert on this channel", which is per channel
+        and can fail independently of dedup, including failing before a
+        claim row is ever written (a crash between save_detection and
+        dispatch). Conflating the two, by letting upsert_post's is_new gate
+        dispatch, is what let a correctly detected post vanish forever if
+        the process died before claim_alert ran. This query is the recovery
+        path for exactly that gap: it finds posts dedup already knows about
+        that this channel has no record of ever having tried.
+        """
+        rows = self._conn.execute(
+            "SELECT id FROM posts WHERE is_stock_related = 1 "
+            "AND id NOT IN (SELECT post_id FROM alerts WHERE channel = ?) "
+            "ORDER BY created_at ASC LIMIT ?",
+            (channel, limit),
+        ).fetchall()
+        return [row["id"] for row in rows]
 
     def get_post_with_detection(self, post_id: str) -> tuple[Post, Detection] | None:
         """Rebuild a post and its stored detection, for retrying a failed delivery."""

@@ -9,14 +9,23 @@ dedup consistent across a failover to this source and back.
 """
 from __future__ import annotations
 
+import logging
 import xml.etree.ElementTree as ET
 from datetime import datetime, timezone
 from email.utils import parsedate_to_datetime
 from typing import Any, Callable
 
 from tsalert.models import Post
-from tsalert.sources.base import PermanentSourceError, SourceError, SourceHealth, TransientSourceError
+from tsalert.sources.base import (
+    PermanentSourceError,
+    SourceError,
+    SourceHealth,
+    TransientSourceError,
+    id_sort_key,
+)
 from tsalert.sources.parse import html_to_text
+
+logger = logging.getLogger(__name__)
 
 Transport = Callable[[str, dict], Any]
 
@@ -39,6 +48,7 @@ class TrumpsTruthRssSource:
         self._transport = transport or self._build_default_transport()
         self._last_success: datetime | None = None
         self._last_error: str | None = None
+        self.skipped_missing_id_count = 0
 
     def _build_default_transport(self) -> Transport:
         def transport(url: str, params: dict) -> Any:
@@ -51,17 +61,17 @@ class TrumpsTruthRssSource:
     def fetch_latest(self, since_id: str | None = None, limit: int = 20) -> list[Post]:
         posts = self._fetch_all()
         if since_id is not None:
-            threshold = int(since_id)
-            posts = [p for p in posts if int(p.id) > threshold]
-        posts.sort(key=lambda p: int(p.id))
+            threshold = id_sort_key(since_id)
+            posts = [p for p in posts if id_sort_key(p.id) > threshold]
+        posts.sort(key=lambda p: id_sort_key(p.id))
         return posts[-limit:] if limit else posts
 
     def fetch_history(self, before_id: str | None = None, limit: int = 20) -> list[Post]:
         posts = self._fetch_all()
         if before_id is not None:
-            threshold = int(before_id)
-            posts = [p for p in posts if int(p.id) < threshold]
-        posts.sort(key=lambda p: int(p.id), reverse=True)
+            threshold = id_sort_key(before_id)
+            posts = [p for p in posts if id_sort_key(p.id) < threshold]
+        posts.sort(key=lambda p: id_sort_key(p.id), reverse=True)
         return posts[:limit] if limit else posts
 
     def health(self) -> SourceHealth:
@@ -111,6 +121,11 @@ class TrumpsTruthRssSource:
     def _parse_item(self, item: ET.Element, fetched_at: datetime) -> Post | None:
         original_id = item.findtext("truth:originalId", namespaces=_TRUTH_NS)
         if not original_id or not original_id.strip():
+            # No id means dedup and last_seen_post_id have nothing safe to
+            # key on. Skipping and counting beats inventing an id, which
+            # would either collide with a real post or poison the id space.
+            self.skipped_missing_id_count += 1
+            logger.warning("RSS item missing truth:originalId, skipping")
             return None
         original_url = item.findtext("truth:originalUrl", namespaces=_TRUTH_NS) or ""
         description = item.findtext("description") or ""

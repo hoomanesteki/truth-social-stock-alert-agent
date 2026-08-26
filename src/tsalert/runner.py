@@ -8,7 +8,7 @@ from typing import Any, Callable
 from tsalert.alerts.dispatcher import AlertDispatcher
 from tsalert.monitor import HealthMonitor
 from tsalert.reliability import AdaptiveInterval
-from tsalert.sources.base import PermanentSourceError, TransientSourceError
+from tsalert.sources.base import PermanentSourceError, TransientSourceError, id_sort_key
 from tsalert.store import Store
 
 logger = logging.getLogger(__name__)
@@ -45,6 +45,16 @@ class AgentRunner:
 
     def poll_once(self) -> int:
         self.dispatcher.retry_failed()
+        # dedup (upsert_post/is_new) and delivery (claim_alert/alerts rows)
+        # are separate concerns on separate schedules: upsert_post answers
+        # "have I seen this post before", which is permanent and global,
+        # while delivery is per channel and can fail independently, even
+        # before a claim row is ever written (a crash between save_detection
+        # and dispatch). retry_failed above recovers claims stuck mid-send;
+        # this recovers posts dedup already knows about that were never
+        # claimed for delivery at all, which used to mean they were lost
+        # forever the moment upsert_post's is_new gate turned False.
+        self.dispatcher.recover_undelivered()
 
         since_id = self.store.get_state(_LAST_SEEN_KEY)
 
@@ -62,31 +72,40 @@ class AgentRunner:
 
         new_count = 0
         last_id = since_id
-        for post in posts:
-            if last_id is None or int(post.id) > int(last_id):
-                last_id = post.id
+        try:
+            for post in posts:
+                if last_id is None or id_sort_key(post.id) > id_sort_key(last_id):
+                    last_id = post.id
 
-            is_new = self.store.upsert_post(post)
-            if not is_new:
-                continue
+                is_new = self.store.upsert_post(post)
+                if not is_new:
+                    continue
 
-            detection = self.detector.detect(post.detection_text, post.id)
-            self.store.save_detection(detection)
-            # Record ingestion latency for EVERY post, not just the ones that
-            # alert. Stock mentions are roughly two percent of posts, so waiting
-            # for a delivered alert to sample latency would take days. The
-            # publish to fetch stage is the one bounded by the poll interval and
-            # it dominates the total, so it is the number worth measuring.
-            self.store.record_latency(
-                post.id,
-                published_at=post.created_at.isoformat(),
-                fetched_at=post.fetched_at.isoformat(),
-                detected_at=datetime.now(timezone.utc).isoformat(),
-            )
-            new_count += 1
-            if detection.is_stock_related:
-                self.dispatcher.dispatch(post, detection)
-                self.alerts_sent += 1
+                detection = self.detector.detect(post.detection_text, post.id)
+                self.store.save_detection(detection)
+                # Record ingestion latency for EVERY post, not just the ones that
+                # alert. Stock mentions are roughly two percent of posts, so waiting
+                # for a delivered alert to sample latency would take days. The
+                # publish to fetch stage is the one bounded by the poll interval and
+                # it dominates the total, so it is the number worth measuring.
+                self.store.record_latency(
+                    post.id,
+                    published_at=post.created_at.isoformat(),
+                    fetched_at=post.fetched_at.isoformat(),
+                    detected_at=datetime.now(timezone.utc).isoformat(),
+                )
+                new_count += 1
+                if detection.is_stock_related:
+                    self.dispatcher.dispatch(post, detection)
+                    self.alerts_sent += 1
+        except (ValueError, TypeError) as exc:
+            # An unexpected id shape or malformed post must never kill the
+            # loop. id_sort_key already makes comparisons safe, but this is
+            # the backstop for anything else in the batch (detector,
+            # store) that assumes well formed data.
+            logger.error("unexpected data shape while processing a batch: %s", exc)
+            self.monitor.record_poll(ok=False, new_posts=0)
+            return 0
 
         if last_id is not None:
             self.store.set_state(_LAST_SEEN_KEY, last_id)

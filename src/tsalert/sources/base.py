@@ -36,6 +36,18 @@ class BlockedSourceError(TransientSourceError):
     """
 
 
+def id_sort_key(post_id: str) -> tuple[int, int, str]:
+    """Order ids numerically when they are numeric, lexically otherwise.
+
+    Truth Social ids are numeric strings, but the RSS mirror passes through
+    whatever the feed provides, so this must not raise on anything.
+    """
+    try:
+        return (0, int(post_id), "")
+    except (TypeError, ValueError):
+        return (1, 0, str(post_id))
+
+
 class PostSource(Protocol):
     name: str
 

@@ -76,18 +76,20 @@ class AlertDispatcher:
         return results
 
     def retry_failed(self) -> list[DeliveryResult]:
-        """Re-attempt alerts that used up every retry inside a previous
-        dispatch() call and were recorded as failed.
+        """Re-attempt alerts stuck at status 'failed' or 'pending'.
 
         claim_alert only guards the first send: once that row exists, no
         future dispatch() call for the same post and channel can get past
         step 1, retries included. Without this method a post that failed
         every attempt (channel down, transient network trouble) would stay
         stuck at status='failed' forever, since nothing else ever revisits
-        it. Meant to be called at the start of each poll cycle.
+        it. A 'pending' row means claim_alert ran and then the process died
+        before record_alert_result ever did, which is exactly a crash
+        mid-send, so it belongs in the same retry set. Meant to be called
+        at the start of each poll cycle.
         """
         results = []
-        for post_id, channel_name in self.store.failed_alerts(self.max_attempts):
+        for post_id, channel_name in self.store.retryable_alerts(self.max_attempts):
             channel = self._find_channel(channel_name)
             if channel is None or not channel.is_configured():
                 continue
@@ -98,6 +100,30 @@ class AlertDispatcher:
             text = format_alert(post, detection)
             detected_at = datetime.now(timezone.utc)
             results.append(self._send_and_record(post, channel, text, detected_at))
+        return results
+
+    def recover_undelivered(self) -> list[DeliveryResult]:
+        """Deliver stock related posts that have no alerts row at all.
+
+        This is the other half of restart safety, separate from
+        retry_failed: retry_failed revisits alerts that were at least
+        claimed (status 'failed' or 'pending'). This revisits posts where
+        the process died before claim_alert was ever reached, so dedup
+        (upsert_post, permanent and global) already knows the post but
+        delivery (per channel, independently fallible) has no record of it
+        at all. Bounded per channel by undelivered_stock_posts' limit so a
+        large backlog cannot stall a poll cycle.
+        """
+        results = []
+        for channel in self.channels:
+            if not channel.is_configured():
+                continue
+            for post_id in self.store.undelivered_stock_posts(channel.name):
+                loaded = self.store.get_post_with_detection(post_id)
+                if loaded is None:
+                    continue
+                post, detection = loaded
+                results.extend(self.dispatch(post, detection))
         return results
 
     # -- internals -----------------------------------------------------
@@ -114,7 +140,13 @@ class AlertDispatcher:
     ) -> DeliveryResult:
         ok, attempts, error = self._send_with_retries(channel, text)
         status = "delivered" if ok else "failed"
-        self.store.record_alert_result(post.id, channel.name, status, error or None)
+        # attempts is the real number of sends _send_with_retries performed
+        # this call, not 1. Recording anything else would let the stored
+        # counter undercount, which is what let attempts < max_attempts
+        # bound poll cycles instead of sends.
+        self.store.record_alert_result(
+            post.id, channel.name, status, error or None, attempts_made=attempts
+        )
         delivered_at = None
         if ok:
             delivered_at = datetime.now(timezone.utc)

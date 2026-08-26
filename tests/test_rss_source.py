@@ -55,3 +55,37 @@ def test_flags_are_false_feed_does_not_carry_them(rss_feed_xml):
     source = _source(rss_feed_xml)
     posts = source.fetch_latest(limit=200)
     assert all(not p.is_repost and not p.is_quote and not p.has_media for p in posts)
+
+
+_FEED_WITH_MISSING_ID = """<?xml version="1.0" encoding="UTF-8"?>
+<rss version="2.0" xmlns:truth="https://truthsocial.com/ns">
+    <channel>
+        <item>
+            <description><![CDATA[<p>has an id</p>]]></description>
+            <pubDate>Tue, 25 Aug 2026 18:32:56 +0000</pubDate>
+            <truth:originalUrl>https://truthsocial.com/@realDonaldTrump/1</truth:originalUrl>
+            <truth:originalId>1</truth:originalId>
+        </item>
+        <item>
+            <description><![CDATA[<p>missing originalId entirely</p>]]></description>
+            <pubDate>Tue, 25 Aug 2026 18:19:49 +0000</pubDate>
+            <truth:originalUrl>https://truthsocial.com/@realDonaldTrump/2</truth:originalUrl>
+        </item>
+        <item>
+            <description><![CDATA[<p>blank originalId</p>]]></description>
+            <pubDate>Tue, 25 Aug 2026 18:19:39 +0000</pubDate>
+            <truth:originalUrl>https://truthsocial.com/@realDonaldTrump/3</truth:originalUrl>
+            <truth:originalId>   </truth:originalId>
+        </item>
+    </channel>
+</rss>
+"""
+
+
+def test_item_missing_original_id_is_skipped_not_given_a_bogus_id():
+    source = _source(_FEED_WITH_MISSING_ID)
+
+    posts = source.fetch_latest(limit=200)
+
+    assert [p.id for p in posts] == ["1"]
+    assert source.skipped_missing_id_count == 2

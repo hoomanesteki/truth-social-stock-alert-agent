@@ -198,16 +198,23 @@ def test_retry_failed_recovers_a_stuck_alert(tmp_path):
     detection = make_detection()
     store.save_detection(detection)
 
-    # Every attempt in the original dispatch fails, so the claim row is
-    # left behind with status='failed'. Without retry_failed nothing would
-    # ever revisit it, since claim_alert would refuse a second dispatch.
+    # The original dispatch uses 3 of the 4 budgeted attempts (two
+    # transient hiccups, then a hard failure) and gives up, leaving the
+    # claim row behind with status='failed' and budget still remaining.
+    # Without retry_failed nothing would ever revisit it, since claim_alert
+    # would refuse a second dispatch.
     failing_channel = FakeChannel(
         "console",
-        outcomes=[TransientSourceError("down")] * 4,
+        outcomes=[
+            TransientSourceError("down"),
+            TransientSourceError("down"),
+            PermanentSourceError("misconfigured"),
+        ],
     )
     dispatcher = AlertDispatcher([failing_channel], store, max_attempts=4, sleep=no_sleep)
     first = dispatcher.dispatch(post, detection)
     assert first[0].ok is False
+    assert first[0].attempts == 3
 
     second_attempt = dispatcher.dispatch(post, detection)
     assert second_attempt == []  # claim_alert blocks it, proving the stuck state
@@ -244,6 +251,59 @@ def test_retry_failed_skips_alert_already_at_max_attempts(tmp_path):
 
     assert results == []
     assert channel.sent == []
+    store.close()
+
+
+def test_retry_failed_picks_up_a_row_stuck_at_pending(tmp_path):
+    store = make_store(tmp_path)
+    post = make_post()
+    store.upsert_post(post)
+    store.save_detection(make_detection())
+
+    # claim_alert with nothing following it is exactly what a crash between
+    # claim and record_alert_result leaves behind: a row that is claimed
+    # but never resolved either way.
+    store.claim_alert(post.id, "console")
+    row = store._conn.execute(
+        "SELECT status FROM alerts WHERE post_id=? AND channel=?", (post.id, "console")
+    ).fetchone()
+    assert row["status"] == "pending"
+
+    channel = FakeChannel("console")
+    dispatcher = AlertDispatcher([channel], store, max_attempts=4, sleep=no_sleep)
+
+    results = dispatcher.retry_failed()
+
+    assert len(results) == 1
+    assert results[0].ok is True
+    assert len(channel.sent) == 1
+
+    row = store._conn.execute(
+        "SELECT status FROM alerts WHERE post_id=? AND channel=?", (post.id, "console")
+    ).fetchone()
+    assert row["status"] == "delivered"
+    store.close()
+
+
+def test_record_alert_result_stores_the_real_number_of_sends_attempted(tmp_path):
+    store = make_store(tmp_path)
+    channel = FakeChannel(
+        "console",
+        outcomes=[TransientSourceError("temporary"), TransientSourceError("temporary"), None],
+    )
+    dispatcher = AlertDispatcher([channel], store, max_attempts=4, sleep=no_sleep)
+    post = make_post()
+    store.upsert_post(post)
+
+    dispatcher.dispatch(post, make_detection())
+
+    # Three real sends happened (two failures then a success), so the
+    # stored counter must read 3, not 1. Storing 1 per call is what let
+    # attempts < max_attempts bound poll cycles instead of real sends.
+    row = store._conn.execute(
+        "SELECT attempts FROM alerts WHERE post_id=? AND channel=?", (post.id, "console")
+    ).fetchone()
+    assert row["attempts"] == 3
     store.close()
 
 

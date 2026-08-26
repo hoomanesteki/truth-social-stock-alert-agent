@@ -5,7 +5,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from tsalert.models import Post
-from tsalert.sources.base import SourceHealth
+from tsalert.sources.base import SourceHealth, id_sort_key
 from tsalert.sources.parse import parse_status
 
 
@@ -23,24 +23,24 @@ class FixtureSource:
             statuses = json.loads(Path(path).read_text())
             for status in statuses:
                 posts.append(parse_status(status, source=self.name))
-        posts.sort(key=lambda p: int(p.id))
+        posts.sort(key=lambda p: id_sort_key(p.id))
         return posts
 
     def fetch_latest(self, since_id: str | None = None, limit: int = 20) -> list[Post]:
         posts = self._posts
         if since_id is not None:
-            threshold = int(since_id)
-            posts = [p for p in posts if int(p.id) > threshold]
+            threshold = id_sort_key(since_id)
+            posts = [p for p in posts if id_sort_key(p.id) > threshold]
         self._last_success = datetime.now(timezone.utc)
         return posts[-limit:] if limit else posts
 
     def fetch_history(self, before_id: str | None = None, limit: int = 20) -> list[Post]:
         posts = self._posts
         if before_id is not None:
-            threshold = int(before_id)
-            posts = [p for p in posts if int(p.id) < threshold]
+            threshold = id_sort_key(before_id)
+            posts = [p for p in posts if id_sort_key(p.id) < threshold]
         # Newest-first, mirroring the real API's max_id pagination pages.
-        ordered = sorted(posts, key=lambda p: int(p.id), reverse=True)
+        ordered = sorted(posts, key=lambda p: id_sort_key(p.id), reverse=True)
         self._last_success = datetime.now(timezone.utc)
         return ordered[:limit] if limit else ordered
 
