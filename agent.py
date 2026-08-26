@@ -11,8 +11,11 @@ from tsalert.alerts.console import ConsoleChannel
 from tsalert.alerts.dispatcher import AlertDispatcher
 from tsalert.alerts.telegram import TelegramChannel
 from tsalert.config import Config
+from tsalert.detect.combined import CombinedDetector
 from tsalert.detect.lexicon import Lexicon
+from tsalert.detect.llm_detector import LlmDetector
 from tsalert.detect.rules import RuleDetector
+from tsalert.llm import GroqClient
 from tsalert.logging_setup import setup_logging
 from tsalert.monitor import HealthMonitor
 from tsalert.reliability import AdaptiveInterval
@@ -25,6 +28,12 @@ from tsalert.store import Store
 
 _REPO_ROOT = Path(__file__).resolve().parent
 _LEXICON_PATH = _REPO_ROOT / "data" / "lexicon" / "tickers.csv"
+_LLM_CACHE_PATH = _REPO_ROOT / "data" / "llm_detector_cache.jsonl"
+# The detector's own model must differ from whatever model produced
+# data/eval/prelabels.jsonl (gpt-oss-120b), or the eval comparison would be
+# grading the LLM arm against labels from its own lineage.
+_DEFAULT_LLM_MODEL = "qwen/qwen3.6-27b"
+_DETECTOR_CHOICES = ("rules", "llm", "combined")
 # The offline demo replays the same recorded pages the test suite uses.
 # fixture.py's own docstring calls this out: "used by tests and --source fixture".
 _FIXTURE_PATHS = [
@@ -54,6 +63,13 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         help="override the configured source",
     )
     run_parser.add_argument("--max-iterations", type=int, default=None, help="bound the loop")
+    run_parser.add_argument(
+        "--detector",
+        choices=_DETECTOR_CHOICES,
+        default=None,
+        help="override the detector arm: rules, llm, or combined "
+        "(default: combined if GROQ_API_KEY is set, otherwise rules)",
+    )
 
     sub.add_parser("test-alert", help="send one sample alert through every configured channel")
     sub.add_parser("health", help="print current health state and any active alarms")
@@ -105,9 +121,37 @@ def build_channels(config: Config) -> list:
     return channels
 
 
-def build_detector() -> RuleDetector:
+def _resolve_detector_name(config: Config, override: str | None) -> str:
+    if override is not None:
+        return override
+    return "combined" if config.groq_api_key else "rules"
+
+
+def build_detector(config: Config, detector_name: str | None = None):
     lexicon = Lexicon.load(_LEXICON_PATH)
-    return RuleDetector(lexicon)
+    name = _resolve_detector_name(config, detector_name)
+    rules = RuleDetector(lexicon)
+
+    if name == "rules":
+        return rules
+
+    if not config.groq_api_key:
+        raise ValueError(f"--detector {name} requires GROQ_API_KEY to be set")
+
+    llm = LlmDetector(
+        GroqClient(
+            api_key=config.groq_api_key,
+            model=config.groq_model or _DEFAULT_LLM_MODEL,
+            cache_path=_LLM_CACHE_PATH,
+        ),
+        lexicon=lexicon,
+    )
+    if name == "llm":
+        return llm
+
+    # combined: rules run first since they are free, the LLM is only
+    # consulted on rule candidates. See detect/combined.py for the cascade.
+    return CombinedDetector(rules, llm)
 
 
 def print_active_channels(channels: list) -> None:
@@ -127,9 +171,15 @@ def cmd_run(args: argparse.Namespace, config: Config) -> int:
     setup_logging(config.log_level, config.log_file)
     source_name = _resolve_source_name(config, args.source)
 
+    detector_name = _resolve_detector_name(config, args.detector)
+    try:
+        detector = build_detector(config, args.detector)
+    except ValueError as exc:
+        print(str(exc), file=sys.stderr)
+        return 2
+
     with Store(config.db_path) as store:
         source = build_source(source_name, config)
-        detector = build_detector()
         channels = build_channels(config)
         dispatcher = AlertDispatcher(channels, store)
         monitor = HealthMonitor(
@@ -144,6 +194,7 @@ def cmd_run(args: argparse.Namespace, config: Config) -> int:
         runner = AgentRunner(source, detector, dispatcher, store, monitor, interval)
 
         print(f"Source: {source_name}")
+        print(f"Detector: {getattr(detector, 'name', detector_name)}")
         print_active_channels(channels)
 
         max_iterations = 1 if args.once else args.max_iterations
