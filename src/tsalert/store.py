@@ -7,7 +7,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Iterator
 
-from tsalert.models import Detection, Post, parse_iso_datetime
+from tsalert.models import Detection, Post, TickerMention, parse_iso_datetime
 
 SCHEMA_SQL = """
 CREATE TABLE IF NOT EXISTS posts (
@@ -173,6 +173,31 @@ class Store:
             values = list(stamps.values()) + [post_id]
             self._conn.execute(f"UPDATE latency SET {columns} WHERE post_id=?", values)
         self._conn.commit()
+
+    def failed_alerts(self, max_attempts: int) -> list[tuple[str, str]]:
+        """Alerts that failed but have attempts left, as (post_id, channel)."""
+        rows = self._conn.execute(
+            "SELECT post_id, channel FROM alerts WHERE status='failed' AND attempts < ?",
+            (max_attempts,),
+        ).fetchall()
+        return [(row["post_id"], row["channel"]) for row in rows]
+
+    def get_post_with_detection(self, post_id: str) -> tuple[Post, Detection] | None:
+        """Rebuild a post and its stored detection, for retrying a failed delivery."""
+        row = self._conn.execute("SELECT * FROM posts WHERE id=?", (post_id,)).fetchone()
+        if row is None:
+            return None
+        raw = json.loads(row["mentions_json"]) if row["mentions_json"] else []
+        detection = Detection(
+            post_id=post_id,
+            is_stock_related=bool(row["is_stock_related"]),
+            mentions=tuple(TickerMention(**m) for m in raw),
+            # The detector name and timing are not persisted, so a retried alert
+            # reports this placeholder. It only affects the alert's label line.
+            detector="retry",
+            latency_ms=0.0,
+        )
+        return self._row_to_post(row), detection
 
     def recent_posts(self, limit: int = 50) -> list[Post]:
         rows = self._conn.execute(
