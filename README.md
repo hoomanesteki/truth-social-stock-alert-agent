@@ -118,7 +118,8 @@ Impersonation is the best option and the most fragile, since it hangs on a setti
 else controls, hence the circuit breaker. The mirror is worse: text and ids only, and it lags.
 
 **Polling** floats between 60 and 300 seconds. He posts in bursts, so quiet polls back off
-1.5x and any new post resets to 60. Roughly 500 requests a day instead of 1,440.
+1.5x and any new post resets to 60. Replaying the real 45 day posting history through it
+gives 305 requests a day against 1,440 for a flat 60 second poll.
 
 **Detection** pairs a rule baseline with an LLM arm. The lexicon rates how ambiguous each
 ticker is, and riskier ones need more context. That came from the corpus, where *trade*,
@@ -134,7 +135,7 @@ The 45-day archive is 1,260 posts. Three properties shaped everything:
 | --- | --- |
 | Zero cashtags in 1,260 posts | The `$DJT` form is implemented but never exercised by real data |
 | 37% of posts have no text | 472 are images or video, invisible to a text detector |
-| 30% sign off "President DJT" | A naive DJT match fires on a third of everything |
+| Every bare `DJT` is his signature | 60 posts contain the token, all 60 are sign-offs, none is the ticker |
 
 With a base rate this low, uniform sampling finds almost no positives, so the set is
 stratified and each stratum answers one question:
@@ -244,7 +245,7 @@ src/tsalert/
 scripts/                  backfill, eval set construction, labeling, evaluation, latency,
                           dashboard (bonus: local read only http.server dashboard)
 data/                     the 45 day archive, the lexicon, the evaluation set
-tests/                    140 tests, offline, against recorded fixtures
+tests/                    195 tests, offline, against recorded fixtures
 ```
 
 ## Tests

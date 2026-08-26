@@ -225,6 +225,7 @@ def cmd_run(args: argparse.Namespace, config: Config) -> int:
 
 def cmd_test_alert(args: argparse.Namespace, config: Config) -> int:
     with Store(config.db_path) as store:
+        scorer = build_sentiment_scorer(config)
         channels = build_channels(config)
         print_active_channels(channels)
         dispatcher = AlertDispatcher(channels, store, sentiment_scorer=scorer)

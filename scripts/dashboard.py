@@ -100,6 +100,17 @@ def _json_for_script(data: object) -> str:
 
 
 def is_running(pid: int) -> bool:
+    # Reap first. An agent we spawned that has already exited stays a zombie
+    # until someone waits on it, and os.kill succeeds on a zombie, so without
+    # this the page reports RUNNING for a process that is dead and also
+    # refuses to start a new one.
+    try:
+        reaped, _ = os.waitpid(pid, os.WNOHANG)
+        if reaped == pid:
+            return False
+    except (ChildProcessError, OSError):
+        pass
+
     try:
         os.kill(pid, 0)
     except ProcessLookupError:
@@ -1168,6 +1179,10 @@ class DashboardHandler(BaseHTTPRequestHandler):
 
         env = dict(os.environ)
         env["POLL_INTERVAL_SECONDS"] = str(interval)
+        # Without this the agent writes to whatever DB_PATH the environment
+        # happens to hold, and the page ends up describing a different
+        # database from the process it just started.
+        env["DB_PATH"] = str(self.db_path)
         proc = self.spawn_fn(
             [sys.executable, str(_AGENT_SCRIPT), "run"],
             cwd=str(_REPO_ROOT),
@@ -1202,8 +1217,13 @@ class DashboardHandler(BaseHTTPRequestHandler):
         _save_setting(self.db_path, "backfill_days", str(days))
         # Fire and forget: the request must not block on a job that can run
         # for minutes and talks to the live network.
+        # Write to a separate file. The default output is data/history.jsonl,
+        # which is the frozen corpus the evaluation set is built from, and a
+        # backfill appends to it.
+        out_path = _REPO_ROOT / "data" / "backfill_latest.jsonl"
         self.spawn_fn(
-            [sys.executable, str(_BACKFILL_SCRIPT), "--days", str(days), "--db", self.db_path],
+            [sys.executable, str(_BACKFILL_SCRIPT), "--days", str(days),
+             "--db", str(self.db_path), "--out", str(out_path)],
             cwd=str(_REPO_ROOT),
         )
         self._send_json(200, {"ok": True, "message": f"backfill started for {days} day(s)", "backfill_days": days})
@@ -1212,11 +1232,13 @@ class DashboardHandler(BaseHTTPRequestHandler):
         form = self._read_form()
         result: dict[str, object] = {"ok": True}
         if "interval" in form:
-            interval = max(10, _parse_int(form.get("interval"), _DEFAULT_INTERVAL_SECONDS))
+            stored = _get_setting_int(self.db_path, "poll_interval_seconds", _DEFAULT_INTERVAL_SECONDS)
+            interval = max(10, _parse_int(form.get("interval"), stored))
             _save_setting(self.db_path, "poll_interval_seconds", str(interval))
             result["poll_interval_seconds"] = interval
         if "backfill_days" in form:
-            days = max(1, _parse_int(form.get("backfill_days"), _DEFAULT_BACKFILL_DAYS))
+            stored_days = _get_setting_int(self.db_path, "backfill_days", _DEFAULT_BACKFILL_DAYS)
+            days = max(1, _parse_int(form.get("backfill_days"), stored_days))
             _save_setting(self.db_path, "backfill_days", str(days))
             result["backfill_days"] = days
         self._send_json(200, result)

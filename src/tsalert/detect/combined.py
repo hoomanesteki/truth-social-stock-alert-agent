@@ -15,7 +15,7 @@ logger = logging.getLogger(__name__)
 class CombinedDetector:
     """Runs the rule detector, then hands off to the LLM when it is worth it.
 
-    Rules go first since they cost nothing. Only about 4 percent of posts
+    Rules go first since they cost nothing. Only about 1 percent of posts
     produce any candidate at all, so the LLM only ever sees those, which
     keeps both the bill and the added latency small. If the LLM call fails
     we still have the rule verdict.

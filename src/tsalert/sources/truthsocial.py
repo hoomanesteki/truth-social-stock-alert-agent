@@ -7,6 +7,7 @@ from typing import Any, Callable
 
 from tsalert.models import Post
 from tsalert.sources.base import (
+    id_sort_key,
     BlockedSourceError,
     PermanentSourceError,
     SourceError,
@@ -72,7 +73,7 @@ class TruthSocialApiSource:
             params["min_id"] = since_id
         data = self._request(params)
         posts = self._parse_page(data)
-        posts.sort(key=lambda p: int(p.id))
+        posts.sort(key=lambda p: id_sort_key(p.id))
         self._record_success()
         return posts
 
@@ -83,7 +84,7 @@ class TruthSocialApiSource:
             params["max_id"] = before_id
         data = self._request(params)
         posts = self._parse_page(data)
-        posts.sort(key=lambda p: int(p.id), reverse=True)
+        posts.sort(key=lambda p: id_sort_key(p.id), reverse=True)
         self._record_success()
         return posts
 
