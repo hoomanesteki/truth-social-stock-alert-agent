@@ -51,11 +51,12 @@ def with_retries(
 
 
 class AdaptiveInterval:
-    """Poll interval that backs off while quiet and resets on new posts.
+    """Grows the poll interval when nothing is arriving, snaps back when it is.
 
-    He posts in bursts, so backing off while quiet cuts request volume
-    roughly two thirds while barely moving latency during a burst, since a
-    burst immediately resets the interval back to base on the next poll.
+    His posting is bursty, long gaps then several in a row, so stretching
+    the interval during the gaps drops request volume by about two thirds.
+    Latency barely moves, because the first post of a burst pulls the
+    interval straight back to base.
     """
 
     def __init__(

@@ -188,10 +188,9 @@ class TruthSocialApiSource:
         return any(marker in body for marker in _CLOUDFLARE_MARKERS)
 
     def _parse_page(self, data: list[dict]) -> list[Post]:
-        # Layout-change detector: a schema change silently turns real posts
-        # into unparseable ones. A handful of bad items is normal noise
-        # (e.g. one status missing a field); a majority means the page format
-        # itself changed and continuing would silently miss everything.
+        # If most of a page fails to parse that is not a couple of bad posts,
+        # it is the response format changing on us. One status missing a
+        # field is normal; a majority means raise rather than return nothing.
         fetched_at = datetime.now(timezone.utc)
         posts = []
         malformed = 0

@@ -22,17 +22,16 @@ class HealthAlarm:
 
 
 class HealthMonitor:
-    """Watches for the agent going quiet without ever looking broken.
+    """Checks whether the agent is actually working, not just running.
 
-    Crashes are easy to spot. The one that hurts is the
-    opposite: polls keep succeeding, parsing keeps succeeding, and no new
-    post ever shows up because the endpoint changed shape or started
-    returning an empty page. no_new_posts is the alarm built for that case.
+    no_new_posts is the main one. Polling and parsing can both keep
+    succeeding while nothing new comes back, usually because the endpoint
+    changed shape or started returning empty pages. Nothing crashes, so
+    nothing else would catch it.
 
-    All state lives in store.agent_state so a process restart cannot reset
-    the staleness clock and quietly hide an outage that has been running
-    for hours, and so alarm suppression also survives a restart instead of
-    re-firing the moment the process comes back up.
+    State lives in store.agent_state rather than memory. A restart should
+    not reset the staleness clock, and alarm suppression has to survive one
+    too or it just re-fires the moment the process comes back.
     """
 
     def __init__(

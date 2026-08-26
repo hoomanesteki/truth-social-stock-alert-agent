@@ -66,7 +66,7 @@ by about 16 posts, and with something on the order of 10 true positives in
 the entire corpus, that one post could dominate the result. Headline
 precision and recall are computed from A and B only. C is reported
 separately as a suppression stress test and feeds error analysis, not the
-headline numbers. That is the honest way to use a purposive sample.
+headline numbers. It is the only way I trust a purposive sample not to mislead.
 
 Weight, for A and B, is stratum_population / stratum_sample_size, per row.
 For a census stratum (A, and B in the edge case where the whole remainder

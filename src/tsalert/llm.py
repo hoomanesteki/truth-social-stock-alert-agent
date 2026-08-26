@@ -142,7 +142,6 @@ class GroqClient:
             with self.cache_path.open("a", encoding="utf-8") as f:
                 f.write(json.dumps({"key": key, "value": value}) + "\n")
 
-    # -- request plumbing ------------------------------------------------
 
     def _throttle(self) -> None:
         now = self._clock()

@@ -13,13 +13,12 @@ logger = logging.getLogger(__name__)
 
 
 class CombinedDetector:
-    """Cascades the rule detector into the LLM detector.
+    """Runs the rule detector, then hands off to the LLM when it is worth it.
 
-    Rules run first because they are free and instant. The LLM is only
-    consulted when the rules produce at least one candidate mention, which
-    bounds both cost and latency, since only about 4 percent of posts have
-    any candidate at all. When the LLM is unavailable, the agent falls back
-    to the rule verdict rather than going silent.
+    Rules go first since they cost nothing. Only about 4 percent of posts
+    produce any candidate at all, so the LLM only ever sees those, which
+    keeps both the bill and the added latency small. If the LLM call fails
+    we still have the rule verdict.
     """
 
     name = "combined"

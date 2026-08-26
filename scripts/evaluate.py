@@ -35,7 +35,7 @@ Only rows where in_weighted_metrics is true (strata "candidate" and
 "random") feed the headline weighted precision/recall/F1. Stratum
 "hard_negative" is a purposive, hand picked sample of suspected false
 positive traps, not a probability sample, so projecting it back onto the
-population would be dishonest; it is reported separately as a suppression
+population would invent a precision number that is not there. Reported separately as a suppression
 stress test and folded into error analysis instead.
 """
 from __future__ import annotations

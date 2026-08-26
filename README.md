@@ -191,13 +191,13 @@ Three samples is thin, because no stock-related post arrived during the window.
 Everything rests on a fingerprint continuing to work and those endpoints staying put, both
 outside my control.
 
-The failure worth engineering against is the quiet one. A 404 is easy. The bad case is a 200
-with a changed shape, where parsing yields nothing and the agent looks healthy while going
-deaf. So if over half a page fails to parse the source raises instead of returning an empty
-list, and a `no_new_posts` heartbeat fires when polls succeed but nothing arrives. That alarm
-state persists, or a restart would reset the clock and hide an outage already underway.
-Behind those, a circuit breaker onto the mirror and error-streak alarms, rate limited so
-nobody learns to ignore them.
+What worried me more than a 404, which you just see, is Truth Social changing the response
+shape underneath me while the parser keeps not erroring and simply comes back empty. So if
+over half a page fails to parse the source raises instead of handing back an empty list, and
+a `no_new_posts` heartbeat fires when polling keeps working but nothing new ever arrives.
+That alarm state is persisted, otherwise a restart resets the clock and buries an outage
+that has already been running for hours. Behind those, a circuit breaker onto the mirror and
+error-streak alarms, all rate limited so nobody learns to ignore them.
 
 **Politeness** is in code, not a comment promising it: a 2.5 second floor between requests,
 an hourly cap that refuses to send past 600, `Retry-After` honoured, strictly sequential

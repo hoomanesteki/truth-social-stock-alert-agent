@@ -38,13 +38,10 @@ class LlmDetector:
         start_time = time.perf_counter()
         user_message = f"Post:\n{text}"
 
-        # A GroqError here (bad schema, non-retryable API error, or a
-        # TransientSourceError that survived every retry) is intentionally
-        # left to propagate. Turning a network failure into a quiet
-        # negative Detection would look identical to "no stock mentioned",
-        # and an alerting agent that reads a failure that way goes silent
-        # without anyone noticing. CombinedDetector is the
-        # layer that decides what to do when the LLM is unavailable.
+        # Let GroqError propagate instead of catching it here. A negative
+        # Detection would be indistinguishable from "no stock mentioned" to
+        # everything downstream. CombinedDetector decides what happens when
+        # Groq is down, not this class.
         label = self.client.complete_json(SYSTEM_PROMPT, user_message, max_tokens=4000)
         self._validate(label)
 

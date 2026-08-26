@@ -14,7 +14,7 @@ label shown at all, so they are labeled with zero exposure to the model's
 opinion. Comparing the LLM arm's score on that blind subset against its
 score on the reviewed subset (where the human saw the proposal before
 deciding) measures how much seeing the proposal actually moved the human,
-which is the honest estimate of how contaminated the reviewed labels are.
+which tells us how much seeing the proposal actually moved the reviewer.
 Only after every blind post is done does the CLI start showing proposals
 for the rest of the sample.
 

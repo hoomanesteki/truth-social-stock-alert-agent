@@ -139,7 +139,7 @@ class RuleDetector:
     """Lexicon and context baseline detector.
 
     This is the baseline every ML arm gets compared against later, so it is
-    built to be a genuine, fair baseline rather than a strawman: it uses the
+    given the full lexicon rather than a cut-down one: it uses the
     full lexicon, matches cashtags, aliases, company names and bare tickers,
     and only requires context where the ambiguity of the match actually
     calls for it.
@@ -166,7 +166,6 @@ class RuleDetector:
         candidates = self._apply_hard_suppressions(candidates, clean_text, tokens)
         candidates = self._mark_index_candidates(candidates)
 
-        # Step 5: deduplicate by ticker, keep the highest confidence mention.
         best: dict[str, _Candidate] = {}
         for c in candidates:
             existing = best.get(c.ticker)
@@ -203,7 +202,6 @@ class RuleDetector:
             latency_ms=latency_ms,
         )
 
-    # -- step 1: cashtags -----------------------------------------------------
 
     def _cashtag_candidates(self, clean_text: str) -> list[_Candidate]:
         out: list[_Candidate] = []
@@ -222,7 +220,6 @@ class RuleDetector:
                 out.append(_Candidate(ticker, "", m.group(0), "cashtag", 0.80, m.start(), m.end()))
         return out
 
-    # -- step 2: aliases and company names -------------------------------------
 
     def _alias_candidates(self, clean_text: str, tokens: list[re.Match]) -> list[_Candidate]:
         out: list[_Candidate] = []
@@ -248,7 +245,6 @@ class RuleDetector:
             )
         return out
 
-    # -- step 3: bare uppercase tickers -----------------------------------------
 
     def _bare_ticker_candidates(self, clean_text: str, tokens: list[re.Match]) -> list[_Candidate]:
         out: list[_Candidate] = []
@@ -271,7 +267,6 @@ class RuleDetector:
             out.append(_Candidate(entry.ticker, entry.company, token, "bare_ticker", conf, m.start(), m.end()))
         return out
 
-    # -- step 4: hard suppression rules -----------------------------------------
 
     def _apply_hard_suppressions(
         self, candidates: list[_Candidate], clean_text: str, tokens: list[re.Match]
@@ -303,7 +298,6 @@ class RuleDetector:
         return out
 
     def _is_djt_signoff(self, clean_text: str, start: int, end: int) -> bool:
-        # Sign-off again. See DJT_SIGNOFF_PATTERN above.
         for m in DJT_SIGNOFF_PATTERN.finditer(clean_text):
             if m.start() <= start and end <= m.end():
                 return True
@@ -327,16 +321,12 @@ class RuleDetector:
             return False
         return not STRONG_PATTERN.search(window)
 
-    # -- context window ---------------------------------------------------------
 
     def _context_window_text(
         self, clean_text: str, tokens: list[re.Match], match_start: int, match_end: int
     ) -> str:
-        # Tokens that overlap the match itself are excluded from the window,
-        # so a match can never supply its own supporting context. This is
-        # what keeps "all time high" from counting as context for its own
-        # ALL match in "the stock market is at an ALL TIME HIGH": the word
-        # "all" there is the match itself, so it cannot also count as evidence.
+        # Tokens overlapping the match are dropped from the window, so a
+        # match can never be its own supporting context.
         overlap = [i for i, tok in enumerate(tokens) if tok.start() < match_end and tok.end() > match_start]
         if not overlap:
             return ""
