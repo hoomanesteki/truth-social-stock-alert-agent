@@ -84,6 +84,33 @@ def test_format_alert_contains_required_fields():
     assert "https://truthsocial.com/@realDonaldTrump/123" in text
 
 
+def make_quote_post(quoted_text: str) -> Post:
+    now = datetime(2026, 8, 25, 18, 32, 56, tzinfo=timezone.utc)
+    return Post(
+        id="456",
+        account="realDonaldTrump",
+        created_at=now,
+        text="",
+        url="https://truthsocial.com/@realDonaldTrump/456",
+        raw_html="<p></p>",
+        is_reply=False,
+        is_repost=False,
+        is_quote=True,
+        has_media=False,
+        source="fixture",
+        fetched_at=now,
+        quoted_text=quoted_text,
+    )
+
+
+def test_format_alert_uses_quoted_text_when_post_text_is_empty():
+    # A quote post carries no words of its own, so an alert body built from
+    # post.text alone would be empty. It must fall back to detection_text
+    # (text plus quoted_text), the same text the detector actually ran on.
+    text = format_alert(make_quote_post("Massive news about the tariffs today"), make_detection())
+    assert "Massive news about the tariffs today" in text
+
+
 def test_format_alert_truncates_long_text():
     long_text = "x" * 3500
     text = format_alert(make_post(long_text), make_detection())

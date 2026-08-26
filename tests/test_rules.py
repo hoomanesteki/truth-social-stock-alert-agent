@@ -122,3 +122,137 @@ def test_no_mentions_for_plain_text(detector: RuleDetector):
     d = detector.detect("Have a wonderful day everyone")
     assert d.is_stock_related is False
     assert d.mentions == ()
+
+
+# Defect 1: an unambiguous company alias must not inherit the ambiguity
+# rating of its ticker symbol. "Truth Social" and "Trump Media" are not
+# ambiguous English even though DJT the symbol collides with Trump's
+# initials.
+
+
+def test_truth_social_alias_fires_djt(detector: RuleDetector):
+    d = detector.detect("Truth Social is doing incredibly well")
+    assert d.is_stock_related is True
+    assert "DJT" in _tickers(d)
+
+
+def test_trump_media_alias_fires_djt(detector: RuleDetector):
+    d = detector.detect("Trump Media had a huge day")
+    assert d.is_stock_related is True
+    assert "DJT" in _tickers(d)
+
+
+def test_president_djt_signoff_still_suppressed(detector: RuleDetector):
+    # Regression guard: must still pass after the alias ambiguity fix.
+    d = detector.detect("Thank you. President DJT")
+    assert d.is_stock_related is False
+
+
+def test_djt_cashtag_still_fires(detector: RuleDetector):
+    # Regression guard: must still pass after the alias ambiguity fix.
+    d = detector.detect("$DJT is going higher")
+    assert d.is_stock_related is True
+    assert "DJT" in _tickers(d)
+
+
+def test_apple_food_cue_still_suppressed(detector: RuleDetector):
+    # Regression guard: must still pass after the alias ambiguity fix.
+    d = detector.detect("I had an Apple pie yesterday")
+    assert d.is_stock_related is False
+
+
+def test_apple_stock_still_fires(detector: RuleDetector):
+    # Regression guard: must still pass after the alias ambiguity fix.
+    d = detector.detect("Apple stock is way up")
+    assert d.is_stock_related is True
+    assert "AAPL" in _tickers(d)
+
+
+def test_doug_ford_surname_not_ford_motor(detector: RuleDetector):
+    d = detector.detect("Lots of bluster from Doug Ford, the Premier")
+    assert d.is_stock_related is False
+
+
+def test_intel_politics_headline_not_intc(detector: RuleDetector):
+    d = detector.detect("Intel Politics: NSA sat on election threat reporting")
+    assert d.is_stock_related is False
+
+
+# Defect 2: indices and ETFs are index_or_etf in the label definition, not
+# specific_equity, so a mention of one alone must not flip is_stock_related.
+
+
+def test_dow_jones_alone_not_stock_related(detector: RuleDetector):
+    d = detector.detect("The Dow Jones just crossed 50,000")
+    assert d.is_stock_related is False
+
+
+def test_nasdaq_alone_not_stock_related(detector: RuleDetector):
+    d = detector.detect("The Nasdaq hit a record high")
+    assert d.is_stock_related is False
+
+
+def test_index_mention_alongside_company_still_stock_related(detector: RuleDetector):
+    d = detector.detect("Tesla is up and so is the Dow Jones")
+    assert d.is_stock_related is True
+    assert "TSLA" in _tickers(d)
+
+
+def test_micron_new_fab_fires_mu(detector: RuleDetector):
+    d = detector.detect("Micron announced a new fab")
+    assert d.is_stock_related is True
+    assert "MU" in _tickers(d)
+
+
+# Defect 5: the alias arm needs a context gate for word sense collisions
+# that are not in the ambiguous_aliases list, using the same suppression
+# cue idea as the Apple food cue.
+
+
+def test_intel_politics_headline_suppressed_by_cue(detector: RuleDetector):
+    d = detector.detect("Intel Politics: NSA sat on election threat reporting")
+    assert d.is_stock_related is False
+
+
+def test_bad_intel_word_sense_suppressed(detector: RuleDetector):
+    d = detector.detect("our intelligence agencies had bad intel")
+    assert d.is_stock_related is False
+
+
+def test_intel_earnings_context_still_fires(detector: RuleDetector):
+    d = detector.detect("Intel earnings beat expectations this quarter")
+    assert d.is_stock_related is True
+    assert "INTC" in _tickers(d)
+
+
+def test_nyt_bestselling_author_suppressed(detector: RuleDetector):
+    d = detector.detect("New York Times Bestselling Author")
+    assert d.is_stock_related is False
+
+
+def test_nyt_stock_context_still_fires(detector: RuleDetector):
+    d = detector.detect("NYT stock jumped after earnings")
+    assert d.is_stock_related is True
+    assert "NYT" in _tickers(d)
+
+
+def test_fox_news_sunday_suppressed(detector: RuleDetector):
+    d = detector.detect("Fox News Sunday is so biased")
+    assert d.is_stock_related is False
+
+
+def test_fox_corporation_shares_still_fires(detector: RuleDetector):
+    d = detector.detect("Fox Corporation shares are up today")
+    assert d.is_stock_related is True
+    assert "FOXA" in _tickers(d)
+
+
+def test_abc_news_tonight_suppressed(detector: RuleDetector):
+    d = detector.detect("Tonight at 9 PM ET, on ABC News")
+    assert d.is_stock_related is False
+
+
+def test_disney_stock_still_fires(detector: RuleDetector):
+    d = detector.detect("Disney stock is up")
+    assert d.is_stock_related is True
+    assert "DIS" in _tickers(d)

@@ -66,6 +66,27 @@ def test_no_new_posts_fires_once_stale_but_not_before(tmp_path):
     store.close()
 
 
+def test_no_new_posts_fires_on_cold_start_with_only_empty_polls(tmp_path):
+    """The exact case the alarm exists for: a fresh store, ingestion broken
+    from the very first poll (HTTP 200 with an empty list). No post has
+    ever been seen, so last_new_post is unset forever unless the staleness
+    clock falls back to the first successful poll instead of staying blind.
+    """
+    store = make_store(tmp_path)
+    clock = FakeClock(datetime(2026, 8, 25, 12, 0, 0, tzinfo=timezone.utc))
+    monitor = HealthMonitor(store, no_posts_hours=12, clock=clock)
+
+    monitor.record_poll(ok=True, new_posts=0)
+    assert "no_new_posts" not in alarm_names(monitor.check())
+
+    for _ in range(16):
+        clock.advance(hours=1)
+        monitor.record_poll(ok=True, new_posts=0)
+
+    assert "no_new_posts" in alarm_names(monitor.check())
+    store.close()
+
+
 def test_repeated_errors_fires_at_threshold_not_one_below(tmp_path):
     store = make_store(tmp_path)
     clock = FakeClock(datetime(2026, 8, 25, 12, 0, 0, tzinfo=timezone.utc))

@@ -12,6 +12,8 @@ class LexiconEntry:
     company: str
     aliases: tuple[str, ...]
     ambiguity: str
+    ambiguous_aliases: tuple[str, ...]
+    kind: str
     notes: str
 
 
@@ -51,11 +53,18 @@ class Lexicon:
                 seen_lower = {a.lower() for a in raw_aliases}
                 if company and company.lower() not in seen_lower:
                     raw_aliases.append(company)
+                # Older csv files may not have these columns yet, so default
+                # to empty and "equity" rather than requiring a migration.
+                ambiguous_raw = row.get("ambiguous_aliases", "") or ""
+                ambiguous_aliases = tuple(a.strip() for a in ambiguous_raw.split("|") if a.strip())
+                kind = (row.get("kind", "") or "equity").strip() or "equity"
                 entries[ticker] = LexiconEntry(
                     ticker=ticker,
                     company=company,
                     aliases=tuple(raw_aliases),
                     ambiguity=row["ambiguity"].strip(),
+                    ambiguous_aliases=ambiguous_aliases,
+                    kind=kind,
                     notes=row["notes"].strip(),
                 )
         return cls(entries)
@@ -66,6 +75,19 @@ class Lexicon:
     @property
     def tickers(self) -> frozenset[str]:
         return frozenset(self._entries)
+
+    def is_alias_ambiguous(self, ticker: str, alias: str) -> bool:
+        """Whether a specific alias of a ticker needs strong context to fire.
+
+        This is separate from entry.ambiguity, which rates the bare symbol.
+        An alias like "Truth Social" is not ambiguous even when its ticker's
+        symbol is (DJT collides with Trump's initials).
+        """
+        entry = self.get(ticker)
+        if entry is None:
+            return False
+        alias_lower = alias.lower()
+        return any(a.lower() == alias_lower for a in entry.ambiguous_aliases)
 
     def entry_for_alias(self, matched_text: str) -> LexiconEntry | None:
         """Look up the entry that owns an alias or company name match.

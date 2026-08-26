@@ -1,96 +1,96 @@
-ticker,company,aliases,ambiguity,notes
-DJT,Trump Media & Technology Group,Trump Media|Truth Social|TMTG|Trump Media and Technology,high,ticker collides with Trump's own initials which he uses to sign posts
-TSLA,Tesla,Tesla|Tesla Motors|the electric car company|Musk's car company,low,
-BA,Boeing,Boeing,medium,two letter ticker collides with common abbreviations
-AAPL,Apple,Apple|Apple Inc|Apple Computer,low,company alias Apple collides with the fruit
-ORCL,Oracle,Oracle|Oracle Corporation,low,
-X,United States Steel,US Steel|U.S. Steel|United States Steel,high,single letter ticker also refers to Musk's X platform
-NVDA,Nvidia,Nvidia|NVIDIA,low,
-INTC,Intel,Intel,low,
-TSM,Taiwan Semiconductor,Taiwan Semiconductor|TSMC,low,
-AMD,Advanced Micro Devices,AMD,low,
-QCOM,Qualcomm,Qualcomm,low,
-MU,Micron,Micron|Micron Technology,medium,
-SMCI,Super Micro Computer,Super Micro|Supermicro,low,
-PLTR,Palantir,Palantir,low,
-META,Meta Platforms,Meta|Facebook|Instagram|WhatsApp,medium,Meta is also a common English adjective
-GOOGL,Alphabet,Google|Alphabet|YouTube,low,
-AMZN,Amazon,Amazon,medium,Amazon is also a river and a region
-MSFT,Microsoft,Microsoft,low,
-NFLX,Netflix,Netflix,low,
-DIS,Disney,Disney|Walt Disney|ABC News|ESPN,medium,
-CMCSA,Comcast,Comcast|NBC|MSNBC|NBCUniversal,low,
-FOXA,Fox Corporation,Fox News|Fox Corporation,medium,Fox is also a surname and an animal
-NYT,New York Times,New York Times|NYT|The Times,medium,
-WMT,Walmart,Walmart|Wal-Mart,low,
-TGT,Target,Target,high,Target is an extremely common English noun and verb
-COST,Costco,Costco,high,COST is a common English noun and verb
-HD,Home Depot,Home Depot,medium,
-LOW,Lowes,Lowe's|Lowes,high,LOW is a common English adjective
-NKE,Nike,Nike,low,
-SBUX,Starbucks,Starbucks,low,
-MCD,McDonalds,McDonald's|McDonalds,low,
-KO,Coca-Cola,Coca-Cola|Coke,medium,
-PEP,PepsiCo,Pepsi|PepsiCo,medium,
-F,Ford,Ford|Ford Motor,high,single letter ticker and Ford is a common surname
-GM,General Motors,General Motors|GM,high,GM also abbreviates general manager and genetically modified
-RIVN,Rivian,Rivian,low,
-LCID,Lucid,Lucid Motors|Lucid Group,medium,
-LMT,Lockheed Martin,Lockheed|Lockheed Martin,low,
-RTX,RTX Corporation,Raytheon|RTX,low,
-NOC,Northrop Grumman,Northrop|Northrop Grumman,low,
-GD,General Dynamics,General Dynamics,medium,
-XOM,Exxon Mobil,Exxon|ExxonMobil,low,
-CVX,Chevron,Chevron,low,
-COIN,Coinbase,Coinbase,medium,coin is a common English noun
-MSTR,Strategy,MicroStrategy|Strategy Inc,medium,
-JPM,JPMorgan Chase,JPMorgan|JP Morgan|Chase Bank,low,
-GS,Goldman Sachs,Goldman Sachs|Goldman,low,
-BAC,Bank of America,Bank of America,low,
-C,Citigroup,Citigroup|Citibank|Citi,high,single letter ticker
-WFC,Wells Fargo,Wells Fargo,low,
-PFE,Pfizer,Pfizer,low,
-MRNA,Moderna,Moderna,low,
-JNJ,Johnson & Johnson,Johnson & Johnson|J&J,medium,
-LLY,Eli Lilly,Eli Lilly|Lilly,low,
-UNH,UnitedHealth,UnitedHealth|United Health,low,
-CVS,CVS Health,CVS,low,
-CAT,Caterpillar,Caterpillar,high,CAT is a common English noun
-DE,Deere,John Deere|Deere,high,DE is a common abbreviation for Delaware and German
-GE,General Electric,General Electric,medium,
-MMM,3M,3M,medium,
-HON,Honeywell,Honeywell,medium,
-IBM,IBM,IBM|International Business Machines,low,
-CRM,Salesforce,Salesforce,medium,
-T,AT&T,AT&T|ATT,high,single letter ticker and T is an extremely common token
-VZ,Verizon,Verizon,low,
-UPS,United Parcel Service,UPS,medium,UPS also abbreviates uninterruptible power supply
-FDX,FedEx,FedEx|Federal Express,low,
-DAL,Delta Air Lines,Delta Air Lines|Delta Airlines,medium,Delta is also a Greek letter and a landform
-UAL,United Airlines,United Airlines,medium,
-AAL,American Airlines,American Airlines,medium,
-LUV,Southwest Airlines,Southwest Airlines,high,LUV reads as an informal spelling of love
-BABA,Alibaba,Alibaba,low,
-NIO,NIO,NIO,medium,
-ALL,Allstate,Allstate,high,ALL is one of the most common English words
-IT,Gartner,Gartner,high,IT is an extremely common English word and abbreviation
-A,Agilent,Agilent Technologies,high,single letter and the most common English article
-ON,ON Semiconductor,ON Semiconductor|onsemi,high,ON is an extremely common English preposition
-SO,Southern Company,Southern Company,high,SO is an extremely common English conjunction
-GO,Grocery Outlet,Grocery Outlet,high,GO is an extremely common English verb
-BIG,Big Lots,Big Lots,high,BIG is a very common English adjective
-KEY,KeyCorp,KeyCorp,high,KEY is a common English noun
-RUN,Sunrun,Sunrun,high,RUN is a common English verb
-NOW,ServiceNow,ServiceNow,high,NOW is an extremely common English adverb
-LOVE,Lovesac,Lovesac,high,LOVE is a very common English noun and verb
-PLAY,Dave & Busters,Dave & Buster's,high,PLAY is a common English verb
-TRUE,TrueCar,TrueCar,high,TRUE is a common English adjective and appears in Truth Social contexts
-FAST,Fastenal,Fastenal,high,FAST is a common English adjective
-OPEN,Opendoor,Opendoor,high,OPEN is a very common English adjective and verb
-WELL,Welltower,Welltower,high,WELL is a very common English word
-HOPE,Hope Bancorp,Hope Bancorp,high,HOPE is a common English noun and verb
-GOOD,Gladstone Commercial,Gladstone Commercial,high,GOOD is an extremely common English adjective
-CARS,Cars.com,Cars.com,high,CARS is a common English noun
-SPY,SPDR S&P 500 ETF,S&P 500|SPDR,high,SPY is a common English noun and verb
-QQQ,Invesco QQQ Trust,Nasdaq 100,low,
-DIA,SPDR Dow Jones ETF,Dow Jones|Dow Jones Industrial Average|the Dow,medium,
+ticker,company,aliases,ambiguity,ambiguous_aliases,kind,notes
+DJT,Trump Media & Technology Group,Trump Media|Truth Social|TMTG|Trump Media and Technology,high,,equity,ticker collides with Trump's own initials which he uses to sign posts
+TSLA,Tesla,Tesla|Tesla Motors|the electric car company|Musk's car company,low,,equity,
+BA,Boeing,Boeing,medium,,equity,two letter ticker collides with common abbreviations
+AAPL,Apple,Apple|Apple Inc|Apple Computer,low,Apple,equity,company alias Apple collides with the fruit
+ORCL,Oracle,Oracle|Oracle Corporation,low,,equity,
+X,United States Steel,US Steel|U.S. Steel|United States Steel,high,US Steel|U.S. Steel,equity,single letter ticker also refers to Musk's X platform
+NVDA,Nvidia,Nvidia|NVIDIA,low,,equity,
+INTC,Intel,Intel,low,Intel,equity,
+TSM,Taiwan Semiconductor,Taiwan Semiconductor|TSMC,low,,equity,
+AMD,Advanced Micro Devices,AMD,low,,equity,
+QCOM,Qualcomm,Qualcomm,low,,equity,
+MU,Micron,Micron|Micron Technology,medium,,equity,
+SMCI,Super Micro Computer,Super Micro|Supermicro,low,,equity,
+PLTR,Palantir,Palantir,low,,equity,
+META,Meta Platforms,Meta|Facebook|Instagram|WhatsApp,medium,Meta,equity,Meta is also a common English adjective
+GOOGL,Alphabet,Google|Alphabet|YouTube,low,,equity,
+AMZN,Amazon,Amazon,medium,Amazon,equity,Amazon is also a river and a region
+MSFT,Microsoft,Microsoft,low,,equity,
+NFLX,Netflix,Netflix,low,,equity,
+DIS,Disney,Disney|Walt Disney|ABC News|ESPN,medium,,equity,
+CMCSA,Comcast,Comcast|NBC|MSNBC|NBCUniversal,low,,equity,
+FOXA,Fox Corporation,Fox News|Fox Corporation,medium,,equity,Fox is also a surname and an animal
+NYT,New York Times,New York Times|NYT|The Times,medium,,equity,
+WMT,Walmart,Walmart|Wal-Mart,low,,equity,
+TGT,Target,Target,high,Target,equity,Target is an extremely common English noun and verb
+COST,Costco,Costco,high,,equity,COST is a common English noun and verb
+HD,Home Depot,Home Depot,medium,,equity,
+LOW,Lowes,Lowe's|Lowes,high,,equity,LOW is a common English adjective
+NKE,Nike,Nike,low,,equity,
+SBUX,Starbucks,Starbucks,low,,equity,
+MCD,McDonalds,McDonald's|McDonalds,low,,equity,
+KO,Coca-Cola,Coca-Cola|Coke,medium,Coke,equity,
+PEP,PepsiCo,Pepsi|PepsiCo,medium,,equity,
+F,Ford,Ford|Ford Motor,high,Ford,equity,single letter ticker and Ford is a common surname
+GM,General Motors,General Motors|GM,high,,equity,GM also abbreviates general manager and genetically modified
+RIVN,Rivian,Rivian,low,,equity,
+LCID,Lucid,Lucid Motors|Lucid Group,medium,,equity,
+LMT,Lockheed Martin,Lockheed|Lockheed Martin,low,,equity,
+RTX,RTX Corporation,Raytheon|RTX,low,,equity,
+NOC,Northrop Grumman,Northrop|Northrop Grumman,low,,equity,
+GD,General Dynamics,General Dynamics,medium,,equity,
+XOM,Exxon Mobil,Exxon|ExxonMobil,low,,equity,
+CVX,Chevron,Chevron,low,,equity,
+COIN,Coinbase,Coinbase,medium,,equity,coin is a common English noun
+MSTR,Strategy,MicroStrategy|Strategy Inc,medium,,equity,
+JPM,JPMorgan Chase,JPMorgan|JP Morgan|Chase Bank,low,,equity,
+GS,Goldman Sachs,Goldman Sachs|Goldman,low,,equity,
+BAC,Bank of America,Bank of America,low,,equity,
+C,Citigroup,Citigroup|Citibank|Citi,high,,equity,single letter ticker
+WFC,Wells Fargo,Wells Fargo,low,,equity,
+PFE,Pfizer,Pfizer,low,,equity,
+MRNA,Moderna,Moderna,low,,equity,
+JNJ,Johnson & Johnson,Johnson & Johnson|J&J,medium,,equity,
+LLY,Eli Lilly,Eli Lilly|Lilly,low,,equity,
+UNH,UnitedHealth,UnitedHealth|United Health,low,,equity,
+CVS,CVS Health,CVS,low,,equity,
+CAT,Caterpillar,Caterpillar,high,,equity,CAT is a common English noun
+DE,Deere,John Deere|Deere,high,,equity,DE is a common abbreviation for Delaware and German
+GE,General Electric,General Electric,medium,,equity,
+MMM,3M,3M,medium,,equity,
+HON,Honeywell,Honeywell,medium,,equity,
+IBM,IBM,IBM|International Business Machines,low,,equity,
+CRM,Salesforce,Salesforce,medium,,equity,
+T,AT&T,AT&T|ATT,high,,equity,single letter ticker and T is an extremely common token
+VZ,Verizon,Verizon,low,,equity,
+UPS,United Parcel Service,UPS,medium,,equity,UPS also abbreviates uninterruptible power supply
+FDX,FedEx,FedEx|Federal Express,low,,equity,
+DAL,Delta Air Lines,Delta Air Lines|Delta Airlines,medium,Delta,equity,Delta is also a Greek letter and a landform
+UAL,United Airlines,United Airlines,medium,,equity,
+AAL,American Airlines,American Airlines,medium,,equity,
+LUV,Southwest Airlines,Southwest Airlines,high,,equity,LUV reads as an informal spelling of love
+BABA,Alibaba,Alibaba,low,,equity,
+NIO,NIO,NIO,medium,,equity,
+ALL,Allstate,Allstate,high,,equity,ALL is one of the most common English words
+IT,Gartner,Gartner,high,,equity,IT is an extremely common English word and abbreviation
+A,Agilent,Agilent Technologies,high,,equity,single letter and the most common English article
+ON,ON Semiconductor,ON Semiconductor|onsemi,high,,equity,ON is an extremely common English preposition
+SO,Southern Company,Southern Company,high,,equity,SO is an extremely common English conjunction
+GO,Grocery Outlet,Grocery Outlet,high,,equity,GO is an extremely common English verb
+BIG,Big Lots,Big Lots,high,,equity,BIG is a very common English adjective
+KEY,KeyCorp,KeyCorp,high,,equity,KEY is a common English noun
+RUN,Sunrun,Sunrun,high,,equity,RUN is a common English verb
+NOW,ServiceNow,ServiceNow,high,,equity,NOW is an extremely common English adverb
+LOVE,Lovesac,Lovesac,high,,equity,LOVE is a very common English noun and verb
+PLAY,Dave & Busters,Dave & Buster's,high,,equity,PLAY is a common English verb
+TRUE,TrueCar,TrueCar,high,,equity,TRUE is a common English adjective and appears in Truth Social contexts
+FAST,Fastenal,Fastenal,high,,equity,FAST is a common English adjective
+OPEN,Opendoor,Opendoor,high,,equity,OPEN is a very common English adjective and verb
+WELL,Welltower,Welltower,high,,equity,WELL is a very common English word
+HOPE,Hope Bancorp,Hope Bancorp,high,,equity,HOPE is a common English noun and verb
+GOOD,Gladstone Commercial,Gladstone Commercial,high,,equity,GOOD is an extremely common English adjective
+CARS,Cars.com,Cars.com,high,,equity,CARS is a common English noun
+SPY,SPDR S&P 500 ETF,S&P 500|SPDR,high,,index_etf,SPY is a common English noun and verb
+QQQ,Invesco QQQ Trust,Nasdaq 100,low,,index_etf,
+DIA,SPDR Dow Jones ETF,Dow Jones|Dow Jones Industrial Average|the Dow,medium,,index_etf,

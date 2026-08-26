@@ -46,7 +46,10 @@ def format_alert(post: Post, detection: Detection) -> str:
     # Report the strongest match's confidence, since that is the one that
     # actually decided whether this alert fired.
     confidence = max((m.confidence for m in detection.mentions), default=0.0)
-    body = _truncate(post.text)
+    # detection_text (text plus quoted_text) is what the detector actually
+    # ran on. A quote post can carry no words of its own, so using post.text
+    # here would deliver an alert whose entire body is the bare RT link.
+    body = _truncate(post.detection_text)
     return (
         f"STOCK MENTION: {tickers}\n"
         f"companies: {companies}\n"

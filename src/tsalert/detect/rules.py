@@ -109,6 +109,20 @@ FOOD_PATTERN = _phrase_pattern(FOOD_CUES)
 # Technology Group stock. This is a real, frequent pattern in the archive.
 DJT_SIGNOFF_PATTERN = re.compile(r"\bPresident\s+(?:DJT|DONALD\s+J\.?\s+TRUMP)\b", re.IGNORECASE)
 
+# Same idea as the Apple food cue above, generalized to a handful of tickers
+# whose company alias is also an everyday word for the news or intelligence
+# senses of that word, not the company. Suppressed only when a cue is
+# nearby and no STRONG_CONTEXT term backs up an actual equity mention, so
+# "ABC News tonight" stays quiet while "Disney stock is up" still fires.
+SUPPRESSION_CUES: dict[str, tuple[str, ...]] = {
+    "INTC": ("intelligence", "agencies", "agency", "memo", "briefing", "classified", "sources"),
+    "NYT": ("bestselling", "bestseller", "best selling", "columnist", "op-ed", "reporter", "wrote"),
+    "FOXA": ("sunday", "host", "anchor", "show", "interview", "segment", "ratings"),
+    "DIS": ("news", "tonight", "hosting", "broadcast", "air", "watch", "tune in"),
+    "CMCSA": ("news", "anchor", "host", "broadcast", "segment"),
+}
+SUPPRESSION_PATTERNS = {ticker: _phrase_pattern(cues) for ticker, cues in SUPPRESSION_CUES.items()}
+
 
 @dataclass
 class _Candidate:
@@ -150,6 +164,7 @@ class RuleDetector:
         candidates.extend(self._bare_ticker_candidates(clean_text, tokens))
 
         candidates = self._apply_hard_suppressions(candidates, clean_text, tokens)
+        candidates = self._mark_index_candidates(candidates)
 
         # Step 5: deduplicate by ticker, keep the highest confidence mention.
         best: dict[str, _Candidate] = {}
@@ -170,8 +185,14 @@ class RuleDetector:
             for c in ordered
         )
 
-        # Step 6: is_stock_related if any surviving mention clears threshold.
-        is_stock_related = any(m.confidence >= self.threshold for m in mentions)
+        # Step 6: is_stock_related if any surviving, non index mention clears
+        # threshold. The label definition puts indices and ETFs in
+        # index_or_etf with is_stock_related FALSE, and an alert has to name
+        # a specific ticker or company, which generic index commentary
+        # ("the Dow Jones just crossed 50,000") does not provide. Index
+        # mentions are still emitted below so the agent can report what it
+        # saw and error analysis can count them.
+        is_stock_related = any(m.confidence >= self.threshold and m.method != "index" for m in mentions)
         latency_ms = (time.perf_counter() - start_time) * 1000
 
         return Detection(
@@ -210,15 +231,18 @@ class RuleDetector:
             entry = self.lexicon.entry_for_alias(m.group(0))
             if entry is None:
                 continue
-            if entry.ambiguity == "low":
-                conf = 0.85
-            elif entry.ambiguity == "medium":
-                conf = 0.70
-            else:  # high
+            # Confidence here keys off whether THIS alias is ambiguous, not
+            # off entry.ambiguity, which rates the bare ticker symbol. A
+            # company alias ("Truth Social") and its symbol (DJT, which
+            # collides with Trump's own initials) can have opposite
+            # ambiguity profiles.
+            if self.lexicon.is_alias_ambiguous(entry.ticker, m.group(0)):
                 window = self._context_window_text(clean_text, tokens, m.start(), m.end())
                 if not STRONG_PATTERN.search(window):
                     continue
                 conf = 0.65
+            else:
+                conf = 0.85
             out.append(
                 _Candidate(entry.ticker, entry.company, m.group(0), "alias", conf, m.start(), m.end())
             )
@@ -259,6 +283,22 @@ class RuleDetector:
             if c.ticker == "AAPL" and c.matched_text.strip().lower() == "apple":
                 if self._is_apple_food_cue(clean_text, tokens, c.start, c.end):
                     continue
+            if c.ticker in SUPPRESSION_PATTERNS and self._is_news_or_word_sense_cue(
+                clean_text, tokens, c.ticker, c.start, c.end
+            ):
+                continue
+            out.append(c)
+        return out
+
+    def _mark_index_candidates(self, candidates: list[_Candidate]) -> list[_Candidate]:
+        # Relabel any candidate whose ticker is an index or ETF (SPY, QQQ,
+        # DIA) as method="index" regardless of which step matched it, so
+        # step 6 can exclude it from is_stock_related while still emitting it.
+        out: list[_Candidate] = []
+        for c in candidates:
+            entry = self.lexicon.get(c.ticker)
+            if entry is not None and entry.kind == "index_etf":
+                c = _Candidate(c.ticker, c.company, c.matched_text, "index", c.confidence, c.start, c.end)
             out.append(c)
         return out
 
@@ -276,6 +316,14 @@ class RuleDetector:
         # pie" would otherwise pass straight through.
         window = self._context_window_text(clean_text, tokens, start, end)
         if not FOOD_PATTERN.search(window):
+            return False
+        return not STRONG_PATTERN.search(window)
+
+    def _is_news_or_word_sense_cue(
+        self, clean_text: str, tokens: list[re.Match], ticker: str, start: int, end: int
+    ) -> bool:
+        window = self._context_window_text(clean_text, tokens, start, end)
+        if not SUPPRESSION_PATTERNS[ticker].search(window):
             return False
         return not STRONG_PATTERN.search(window)
 

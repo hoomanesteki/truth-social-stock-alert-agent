@@ -9,6 +9,7 @@ from tsalert.store import Store
 
 _LAST_POLL_KEY = "health_last_poll_at"
 _LAST_SUCCESS_KEY = "health_last_successful_poll_at"
+_FIRST_SUCCESS_KEY = "health_first_successful_poll_at"
 _LAST_NEW_POST_KEY = "health_last_new_post_at"
 _CONSECUTIVE_ERRORS_KEY = "health_consecutive_errors"
 _ALARM_FIRED_PREFIX = "health_alarm_fired_"
@@ -56,6 +57,8 @@ class HealthMonitor:
 
         if ok:
             self.store.set_state(_LAST_SUCCESS_KEY, now.isoformat())
+            if self.store.get_state(_FIRST_SUCCESS_KEY) is None:
+                self.store.set_state(_FIRST_SUCCESS_KEY, now.isoformat())
             consecutive_errors = 0
         else:
             consecutive_errors = self._get_int(_CONSECUTIVE_ERRORS_KEY) + 1
@@ -80,7 +83,13 @@ class HealthMonitor:
                     )
                 )
 
-        last_new_post = self._get_datetime(_LAST_NEW_POST_KEY)
+        # Fall back to the first successful poll when no post has ever been
+        # seen, so the staleness clock starts from when the agent began
+        # rather than staying unset forever on a fresh store where
+        # ingestion is broken from the very first poll (HTTP 200, empty
+        # list). Without this fallback that exact case, the one this alarm
+        # exists for, never fires.
+        last_new_post = self._get_datetime(_LAST_NEW_POST_KEY) or self._get_datetime(_FIRST_SUCCESS_KEY)
         if last_new_post is not None:
             age = now - last_new_post
             if age > timedelta(hours=self.no_posts_hours):
