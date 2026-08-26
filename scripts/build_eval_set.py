@@ -72,7 +72,7 @@ Weight, for A and B, is stratum_population / stratum_sample_size, per row.
 For a census stratum (A, and B in the edge case where the whole remainder
 was taken) population equals sample size, so weight is 1.0: that row does
 not need to be reweighted to represent its stratum, because it already
-contains 100% of it. This is what lets Break 4 report population level
+contains 100% of it. That is what lets us report population level
 precision and recall instead of numbers that only describe the 150 sampled
 posts. For C, weight is always 0.0 regardless of population and sample
 size, per the purposive-sample reasoning above; stratum_population and

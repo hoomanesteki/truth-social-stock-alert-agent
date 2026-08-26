@@ -72,131 +72,138 @@ it a restarted container would re-alert on every post it had already seen.
 
 ## 1. Approach
 
-**Reading without an API.** Truth Social runs a Mastodon fork, so it exposes
-Mastodon-compatible JSON endpoints that its own web client uses. The timeline is at
-`/api/v1/accounts/{id}/statuses`, paginated via the RFC 5988 `Link` header with `max_id`
-and `min_id`. The obstacle is Cloudflare: plain `requests` or `curl` gets a 403. TLS
-fingerprint impersonation works. `curl_cffi` with `impersonate="safari17_0"` returns 200
-and clean JSON, while `chrome124` is still blocked, so the exact fingerprint matters and is
-pinned in config.
+**Getting the posts.** Truth Social is a Mastodon fork and never hid it. The web client
+talks to `/api/v1/accounts/{id}/statuses`, paginated with `max_id` and `min_id` via the
+standard `Link` header, so it comes back as clean JSON on a documented schema. The catch is
+Cloudflare: plain `requests` gets a 403, and so does `curl`.
 
-Four options considered:
+TLS fingerprint impersonation got through: `curl_cffi` with `impersonate="safari17_0"`
+returns 200. Worth flagging how arbitrary that is, since `chrome124` is still blocked. I
+found the working one by trying a few, not by understanding Cloudflare's rules, so the
+exact string is pinned in config before someone "cleans it up".
+
+Four options I weighed:
 
 | Approach | Verdict |
 | --- | --- |
-| Mastodon JSON with TLS impersonation | **Chosen.** Structured, `min_id` returns only new posts, documented schema rather than scraped markup |
-| `trumpstruth.org` RSS mirror | **Fallback.** Carries `truth:originalId`, the same status ids as the primary, so dedup survives failover with no reconciliation |
-| Headless browser on the HTML | Rejected. Slow and brittle, no gain over an endpoint returning JSON |
-| Third-party aggregators | Rejected. Adds latency and depends on someone else's uptime and editorial choices |
+| Mastodon JSON with TLS impersonation | **Chosen.** Structured, `min_id` returns only what is new, documented schema instead of scraped markup |
+| `trumpstruth.org` RSS mirror | **Fallback.** It exposes `truth:originalId`, the same status ids the primary uses, so failing over does not confuse dedup |
+| Headless browser on the HTML | Rejected. Slow and fragile, and buys nothing over an endpoint that already returns JSON |
+| Third-party aggregators | Rejected. Extra latency, plus a dependency on someone else's uptime and editorial judgement |
 
-The trade-off: TLS impersonation is the lowest-latency, highest-fidelity route and also the
-most fragile, since it depends on a bot-protection setting that can change without notice.
-Hence the mirror behind a circuit breaker. The mirror is a degraded mode, not an equal: it
-carries text and ids but loses repost, quote and media structure, and it lags the source.
+The shared ids were luck as much as judgement. Had the mirror minted its own, failing over
+would risk re-alerting everything already sent.
 
-**Polling.** The interval adapts between 60 and 300 seconds. He posts in bursts, so a quiet
-poll multiplies the interval by 1.5 up to a cap and any new post snaps it back to 60
-seconds. Against a fixed 60 second poll that cuts volume from about 1,440 to about 500
-requests per day, costing latency only on the post that opens a burst.
+The trade-off: impersonation gives the best latency and fidelity and is also likeliest to
+break, since it hangs on a setting somebody else controls. Hence the circuit breaker. The
+mirror is genuinely worse though: text and ids only, no repost, quote or media structure,
+and it runs behind.
 
-**Detection.** A rule baseline and an LLM arm, compared head to head. The rules use a 95-row
-lexicon where each row carries an ambiguity rating: the higher it is, the more context a
-match must earn. The design turns on one observation, that here political and financial
-vocabulary overlap heavily, since *trade*, *market*, *deal* and *economy* are everyday
-political words. Context terms therefore split into strong evidence (stock, shares, NASDAQ,
-earnings) and weak (market, trade, economy), and high-ambiguity tickers require the strong
-kind. Without that split, his habit of writing in capitals turns ALL, BIG and NOW into
-constant false positives.
+**Polling.** The interval floats between 60 and 300 seconds. He posts in bursts, so each
+quiet poll multiplies the wait by 1.5 up to the cap and any new post drops it back to 60.
+That is roughly 500 requests a day instead of 1,440. The cost falls on whichever post opens
+a burst, which can wait up to five minutes.
+
+**Detection.** Two arms, compared. The rules run off a 95-row lexicon rating how ambiguous
+each ticker is, so a riskier one needs more supporting context before it counts. That came
+straight out of reading the corpus: political and financial vocabulary overlap badly here,
+since *trade*, *market*, *deal* and *economy* are ordinary political words in this account.
+Context terms split into strong (stock, shares, NASDAQ, earnings) and weak (market, trade,
+economy), and risky tickers need the strong kind. Skip that split and his habit of shouting
+in capitals turns ALL, BIG and NOW into a stream of garbage.
+
+The LLM arm (`qwen/qwen3.6-27b` on Groq) only runs once the rules find a candidate. About 4%
+of posts get that far, which bounds both cost and added latency and points the model at the
+cases the rules genuinely cannot settle.
 
 ## 2. Results
 
-The 45-day archive is 1,260 posts, about 28 per day. Three properties shaped everything
-downstream:
+The 45-day archive is 1,260 posts, roughly 28 a day. Three things about it shaped everything
+after:
 
-- **Zero cashtags** in 1,260 posts. The `$DJT` form the brief leads with is implemented and
-  unit tested but never exercised by real data.
-- **37% of posts have no text at all.** 472 are images or video, invisible to a text
-  detector. That is a ceiling on recall no model quality can lift.
-- **235 posts, 30% of text posts, sign off "President DONALD J. TRUMP" or "President DJT".**
-  A naive DJT match would fire on a third of everything he writes.
+- **Not one cashtag.** Zero `$TICKER` occurrences in 1,260 posts. The `$DJT` form the brief
+  opens with is implemented and unit tested, and real data never exercises it once.
+- **37% of posts have no text.** 472 are images or video. A text detector cannot see them at
+  all, and no amount of model quality fixes that.
+- **235 posts, 30% of the ones with text, end with "President DONALD J. TRUMP" or
+  "President DJT".** Match DJT naively and you fire on a third of everything he writes.
 
-**Labeled set.** With a base rate near zero, a uniform sample of 150 posts would hold almost
-no positives and recall would be unmeasurable. The set is stratified, each stratum answering
-one question:
+**The labeled set.** With a base rate this low, sampling 150 posts uniformly would have
+turned up almost no positives and left recall unmeasurable. So the set is stratified, and
+each stratum is there to answer one question:
 
-| Stratum | n | Question it answers | Weight |
+| Stratum | n | Question | Weight |
 | --- | --- | --- | --- |
-| candidate | 30 | When it fires, is it right? | 1.0, a census, so precision is exact |
-| random | 95 | What does it miss? | 3.85, projected to the population |
-| hard_negative | 25 | Does suppression work? | 0.0, excluded from headline metrics |
+| candidate | 23 | When it fires, is it right? | 1.0, a census, so precision is exact |
+| random | 102 | What gets missed? | 3.62, projected back to the population |
+| hard_negative | 25 | Does suppression hold? | 0.0, kept out of the headline numbers |
 
-Hard negatives are hand-picked to be adversarial, making them a purposive rather than
-probability sample. Projecting them onto the population would let one labeling call swing
-the estimate by sixteen posts, which against roughly ten true positives would decide the
-result by itself. They are reported separately as a suppression stress test.
+Hard negatives are picked by hand to be nasty, which makes them purposive. Weighting them
+back onto the population would let one labeling call move the estimate by sixteen posts, and
+with roughly ten true positives in the corpus that call would decide the answer. They get
+reported separately as a suppression check.
 
-Labels were proposed by `gpt-oss-120b` then reviewed by a human on every row. Since that
-partly grades the LLM arm against its own output, 30 posts are labeled blind with no proposal
-shown, drawn proportionally across strata. Comparing the arm on the blind subset against the
-reviewed subset makes its score falsifiable rather than self-graded. The models are from
-different families on purpose: `gpt-oss-120b` labels, `qwen3.6-27b` detects.
+Labels were drafted by `gpt-oss-120b`, then reviewed by hand on every row. That partly grades
+the LLM arm against its own homework, so 30 posts are labeled blind with no proposal visible,
+drawn proportionally from each stratum. Comparing those 30 against the other 120 is what
+makes the number checkable. The models differ by family on purpose: `gpt-oss-120b` drafts,
+`qwen3.6-27b` detects.
 
-*Metrics and the measured latency are filled in once the labeled set is complete. This
-section is deliberately left empty rather than populated with placeholder numbers.*
+`scripts/evaluate.py` produces the metrics and writes `data/eval/metrics.md`: weighted
+precision, recall and F1 for both arms, with bootstrap intervals, since a bare F1 on a
+positive class this small is mostly noise.
 
 ## 3. Robustness and ethics
 
-The primary route depends on a TLS fingerprint continuing to pass Cloudflare and on the
-Mastodon-compatible endpoints staying. Either could change without warning. Mitigations,
-ordered by how quietly the failure would otherwise happen:
+Everything rests on a TLS fingerprint continuing to work and those endpoints staying put.
+Both are outside my control.
 
-- **Silent schema change is the dangerous one.** A 404 is loud. What hurts is HTTP 200 with a
-  changed shape: you parse nothing, alert on nothing, and the dashboard says healthy forever.
-  If over half a page fails to parse, the source raises rather than returning an empty list.
-- **A `no_new_posts` heartbeat.** Polls succeeding while nothing new arrives for N hours is
-  what a silently emptied response looks like from outside. Alarm state persists, so a
-  restart cannot reset the clock and hide an outage already hours old.
-- **A circuit breaker with automatic failover** to the mirror after repeated failures, with
-  the transition logged and alerted, plus consecutive-error and stale-poll alarms, all rate
-  limited so an operator does not learn to ignore them.
+I spent most of the time on the failure that does not announce itself. A 404 is easy. The bad
+case is a 200 with a changed shape, where parsing yields nothing and the agent looks healthy
+while going deaf. Two guards: if over half a page fails to parse the source raises instead of
+returning an empty list, and a `no_new_posts` heartbeat fires when polls keep succeeding but
+nothing arrives for hours. That alarm state persists, or restarting would reset the clock and
+paper over an outage already underway.
 
-**Politeness** is enforced in code, not promised in a comment. A monotonic throttle holds a
-floor of 2.5 seconds between any two requests, a rolling hourly cap refuses to send past 600
-rather than merely warning, `Retry-After` is honored on 429, and requests are strictly
-sequential. The cap matters most: backoff and retry are both correct right up until a loop
-bug turns them into a hammer, and the cap bounds that worst case.
+Behind those, a circuit breaker fails over to the mirror, plus stale-poll and error-streak
+alarms, rate limited so nobody learns to ignore them.
 
-**Legal and terms of service.** This reads public pages with no account and no access to
-anything a browser is not already served, is read-only, and stores nothing beyond public post
-text. The mirror's `robots.txt` permits all crawling; Truth Social serves none. Still,
-undisclosed automated access plausibly conflicts with their terms even where technically
-permitted, and TLS impersonation deliberately circumvents a bot-protection measure, which is
-a real step beyond reading a public page. At one request per minute for a prototype that is
-proportionate; productionizing it would warrant a licensed feed or explicit permission rather
-than a heavier version of the same trick. Scale changes the ethics even when the mechanism
-does not.
+**Politeness** is in the code, not a comment promising good behaviour: a 2.5 second floor
+between requests, a rolling hourly cap that refuses to send past 600 rather than just logging
+about it, `Retry-After` respected on 429, strictly sequential requests. The cap is the one I
+care about. Backoff and retry stay correct right up until a loop bug turns them into a
+hammer, and the cap is what bounds that.
+
+**Legal and ToS.** This reads public pages with no account and takes nothing a browser is not
+already handed. Read-only, and it keeps only public post text. The mirror's `robots.txt`
+allows everything; Truth Social does not publish one.
+
+I would rather not oversell that. Automated access probably conflicts with their terms even
+though the pages are public, and impersonating a browser's TLS fingerprint is deliberately
+working around bot protection, which goes past just reading a page. At one request a minute
+for a prototype I think it is fine. To run this for real I would want a licensed feed or
+actual permission instead of a heavier version of the same trick.
 
 ## 4. Limitations and next steps
 
-**Limitations.** The 37% of posts that are pure media are invisible; OCR is the obvious fix.
-The lexicon is a hard recall ceiling: ground truth already contains `SPGI`, `V`, `TM` and
-`TMUS`, none in the 95 rows, so the rule arm cannot find them at any threshold while the LLM
-has no such limit. The positive class is small, so intervals are wide and reported as such.
+**Limitations.** The 37% of posts that are pure media are invisible; OCR is the obvious
+answer. The lexicon caps recall outright, since ground truth already includes `SPGI`, `V`,
+`TM` and `TMUS`, none among the 95 rows, so the rule arm cannot reach them at any threshold
+while the LLM has no such ceiling. The positive class is small enough that intervals are
+wide, which is reported rather than smoothed over.
 
-**Multiple accounts.** Ingestion is already per-account, so this is scheduling, not
-architecture. Replace the single loop with a priority queue keyed on each account's observed
-posting rate, so a busy account polls at 60 seconds while a quiet one drifts to 15 minutes,
-all under one global rate budget. Dedup and idempotency already key on the status id, so
-storage is unchanged.
+**More accounts.** Ingestion is already per-account, so this is scheduling rather than
+architecture. Swap the single loop for a priority queue keyed on each account's observed
+posting rate: a busy account polls every 60 seconds while a quiet one drifts to 15 minutes,
+under one global request budget. Dedup and idempotency already key on the status id, so
+storage is untouched.
 
-**Production evaluation without hand-labeling everything.** Three things compound. Run both
-arms on all live traffic and hand-label only where they disagree, concentrating attention on
-the decision boundary. Treat delivered alerts as a labeling queue, so a thumbs up or down in
-Telegram returns labels at nearly zero marginal cost. And monitor input drift rather than
-accuracy: candidate generation rate and ticker distribution over time need no labels at all,
-and a sharp move in either is usually the first sign that the world or the scraper changed.
-
----
+**Evaluating in production without labeling everything.** Three things stack. Run both arms
+over live traffic and hand-label only where they disagree, putting the effort on the decision
+boundary. Turn delivered alerts into a labeling queue, where a thumbs up or down in Telegram
+returns a label for almost nothing. And watch input drift rather than accuracy: candidate
+rate and ticker distribution need no labels at all, and a sharp move in either is usually the
+first hint something changed, in the world or in the scraper.
 
 ## Repository layout
 

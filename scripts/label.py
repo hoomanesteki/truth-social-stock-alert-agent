@@ -5,7 +5,7 @@
         --prelabels data/eval/prelabels.jsonl --out data/eval/labeled.jsonl \
         --blind-count 30 --seed 42
 
-BLIND HOLDOUT, this is the point of the whole design: the LLM arm in Break 4
+The blind holdout is the point of the design here. The LLM arm
 is partly graded against labels the LLM helped produce. That is
 contamination. To measure how much it is worth, a fixed number of posts
 (blind-count) are selected deterministically, proportionally across strata,

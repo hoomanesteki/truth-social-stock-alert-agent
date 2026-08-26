@@ -11,7 +11,7 @@ pair hashes to the same cache key.
 
 The rule detector's output is never included in the prompt. The LLM must
 label each post independently of the rule-based detector, or the precision
-and recall comparison in Break 4 would be measuring the LLM against a
+and recall comparison would end up measuring the LLM against a
 detector it had already seen the answer from.
 """
 from __future__ import annotations

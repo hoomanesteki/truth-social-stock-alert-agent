@@ -23,7 +23,7 @@ class Transition:
 class FailoverSource:
     """Wraps a primary and a fallback source behind one PostSource interface.
 
-    Break 5 turns transitions into an ops alert, so every switch (primary to
+    Transitions become an ops alert, so every switch (primary to
     fallback and back) is logged at WARNING and recorded on last_transition
     for easy observation, not just printed.
     """
