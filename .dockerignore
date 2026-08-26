@@ -1,0 +1,12 @@
+.venv/
+.git/
+data/*.db
+data/*.db-wal
+data/*.db-shm
+data/history.jsonl
+data/eval/
+logs/
+__pycache__/
+*.pyc
+.env
+notebooks/

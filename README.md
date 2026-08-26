@@ -55,6 +55,17 @@ uv run python scripts/latency_report.py
 
 All sampling is seeded, so reruns are byte identical.
 
+### Docker
+
+```bash
+docker build -t tsalert .
+docker run --rm tsalert                                  # offline demo, no credentials
+docker run --rm --env-file .env -v tsalert-data:/data tsalert run
+```
+
+The volume matters: dedup and alert idempotency both live in the SQLite file, so without
+it a restarted container would re-alert on every post it had already seen.
+
 ---
 
 # Write-up
