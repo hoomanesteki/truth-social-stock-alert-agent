@@ -111,8 +111,7 @@ their rules, and it is pinned in config before someone tidies it away.
 | Third-party aggregators | Rejected. Added latency plus someone else's uptime |
 
 Impersonation is the best option and the most fragile, since it hangs on a setting somebody
-else controls, hence the circuit breaker. The mirror is genuinely worse: text and ids only,
-no repost or media structure, and it lags.
+else controls, hence the circuit breaker. The mirror is worse: text and ids only, and it lags.
 
 **Polling** floats between 60 and 300 seconds. He posts in bursts, so quiet polls back off
 1.5x and any new post resets to 60. Roughly 500 requests a day instead of 1,440.
@@ -120,8 +119,8 @@ no repost or media structure, and it lags.
 **Detection** pairs a rule baseline with an LLM arm. The lexicon rates how ambiguous each
 ticker is, and riskier ones need more context. That came from the corpus, where *trade*,
 *market* and *economy* are ordinary political words, so context terms split into strong
-(stock, shares, NASDAQ, earnings) and weak. Without that split his habit of shouting in
-capitals turns ALL, BIG and NOW into noise.
+(stock, shares, earnings) and weak. Without that split, his habit of shouting in capitals
+turns ALL, BIG and NOW into noise.
 
 ## 2. Results
 
@@ -133,8 +132,8 @@ The 45-day archive is 1,260 posts. Three properties shaped everything:
 | 37% of posts have no text | 472 are images or video, invisible to a text detector |
 | 30% sign off "President DJT" | A naive DJT match fires on a third of everything |
 
-With a base rate this low, uniform sampling would find almost no positives. The set is
-stratified, each stratum answering one question:
+With a base rate this low, uniform sampling finds almost no positives, so the set is
+stratified and each stratum answers one question:
 
 | Stratum | n | Question | Weight |
 | --- | --- | --- | --- |
@@ -143,7 +142,7 @@ stratified, each stratum answering one question:
 | hard_negative | 25 | Does suppression hold? | 0.0, excluded from headline |
 
 Hard negatives are picked to be adversarial, so weighting them onto the population would let
-one call shift the estimate by sixteen posts. Reported separately instead.
+one call shift the estimate by sixteen posts. They are reported separately.
 
 **Rule baseline**, weighted over candidate and random, 15 positives:
 
@@ -154,33 +153,22 @@ one call shift the estimate by sixteen posts. Reported separately instead.
 | F1 | 0.797, bootstrap 95% CI [0.558, 0.968] |
 | Trap suppression | 25/25 |
 
-Both false negatives are known limitations: S&P Global, whose symbol is not among the 95
-lexicon rows, and a bare CNBC link, since URLs are stripped before matching.
+Both false negatives are known limitations: S&P Global, absent from the 95 lexicon rows, and
+a bare link, since URLs are stripped before matching.
 
-**How the labels were made.** Two stages. `openai/gpt-oss-120b` proposes a label for every
-post, then a stronger model adjudicates each row against a written rubric covering the
-recurring hard cases: media brands he appears on versus companies as corporate entities,
-companies named in passing as an employer or donor, private companies, and the DJT sign-off.
-The adjudicator changed 8 of the 150 proposals.
+**How the labels were made.** `gpt-oss-120b` proposes a label for each post, then a stronger
+model adjudicates every row against a written rubric for the recurring hard cases: media
+brands he appears on versus companies as corporate entities, companies named in passing as
+an employer or donor, private companies, and the DJT sign-off. The adjudicator changed 8 of
+150. A third model from another family, `gpt-oss-safeguard-20b`, then relabeled all 150
+blind and agreed on 149, so the labels are stable rather than one model's opinion. The lone
+disagreement is S&P Global cited as the source of a report, a real judgement call.
 
-To check the labels are stable rather than one model's opinion, a third model from a
-different family, `openai/gpt-oss-safeguard-20b`, relabeled all 150 blind:
-
-| Check | Result |
-| --- | --- |
-| Agreement on stock-related | 149 / 150, 99.3% |
-| Disagreements | 1 |
-
-The single disagreement is the S&P Global post, where a company is cited as the source of a
-report rather than discussed as a business. That is a genuine judgement call and it is
-documented in the labeling notes.
-
-**The LLM arm scored 1.000, and that is still not evidence.** High agreement across three
-models shows the labels are consistent; it does not make them independent of the detector,
-because everything in that chain is a language model. Scoring a model against labels a
-similar model wrote is circular, and the blind holdout shows a zero gap for the same reason.
-A trustworthy baseline-versus-ML comparison needs human labels. That is the biggest weakness
-here, and I would rather say so than report a perfect score.
+**The LLM arm scored 1.000, and that is still not evidence.** Agreement across three models
+makes the labels consistent, not independent of the detector, since every step is a language
+model. Scoring a model against labels a similar model wrote is circular, and the blind
+holdout shows a zero gap for the same reason. A trustworthy comparison needs human labels.
+That is the biggest weakness here, and I would rather say so than report a perfect score.
 
 **Latency**, over a 90 poll live run:
 
@@ -191,9 +179,8 @@ here, and I would rather say so than report a perfect score.
 | Detected to delivered | 0.3 ms |
 
 The poll interval is effectively the whole budget, which makes the adaptive backoff a latency
-decision as much as a politeness one. A fourth sample read 824s and is excluded as cold
-start, the first poll after startup collecting an older post. Three samples is thin, because
-no stock-related post arrived during the window.
+decision as much as a politeness one. A fourth sample read 824s and is excluded as cold start.
+Three samples is thin, because no stock-related post arrived during the window.
 
 ## 3. Robustness and ethics
 
@@ -222,10 +209,10 @@ would want a licensed feed or permission.
 
 ## 4. Limitations and next steps
 
-Media-only posts are invisible; OCR is the obvious answer. The lexicon caps recall outright,
-since ground truth contains `SPGI`, `V`, `TM` and `TMUS`, none among the 95 rows. Fifteen
-positives makes every interval wide. And the ground truth is model-generated, so the ML
-comparison is not yet trustworthy.
+Media-only posts are invisible; OCR is the obvious answer. The lexicon caps recall, since
+ground truth contains `SPGI`, `V`, `TM` and `TMUS`, none among the 95 rows. Fifteen positives
+makes every interval wide. And the labels are model-generated, so the ML comparison is not
+yet trustworthy.
 
 **More accounts** is scheduling, not architecture. Replace the single loop with a priority
 queue keyed on each account's posting rate, so a busy account polls every 60 seconds and a
