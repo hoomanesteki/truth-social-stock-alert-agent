@@ -436,3 +436,34 @@ def test_backlog_recovery_does_not_stamp_latency(tmp_path):
     rows = store._conn.execute("SELECT COUNT(*) FROM latency").fetchone()[0]
     store.close()
     assert rows == 0
+
+
+
+def test_cursor_written_before_namespacing_is_carried_forward(tmp_path):
+    """Upgrading must not orphan the polling cursor.
+
+    Namespacing the key per account left older databases pointing at a key
+    nothing reads, so the agent restarted from the top of the timeline and
+    re-fetched weeks of posts. Found by upgrading a live database.
+    """
+    from tsalert.runner import _LAST_SEEN_KEY
+
+    class RecordingSource(EmptySource):
+        def __init__(self):
+            self.since_ids = []
+
+        def fetch_latest(self, since_id=None, limit: int = 20):
+            self.since_ids.append(since_id)
+            return []
+
+    store = make_store(tmp_path)
+    store.set_state(_LAST_SEEN_KEY, "117157578446470768")
+
+    source = RecordingSource()
+    runner = make_runner(source, FakeDispatcher(), store)
+    runner.account = "realDonaldTrump"
+    runner.poll_once()
+
+    assert source.since_ids[-1] == "117157578446470768"
+    assert store.get_state("last_seen_post_id:realDonaldTrump") == "117157578446470768"
+    store.close()

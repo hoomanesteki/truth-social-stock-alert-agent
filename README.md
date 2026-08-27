@@ -225,7 +225,9 @@ interval here. And the labels are model generated, so the ML comparison is not t
 
 **More accounts** is mostly scheduling now. Sources are per account, posts carry it, dedup
 keys on the status id, and the polling cursor is namespaced, which it was not until I ran two
-accounts against one database and watched the second overwrite the first. What is left is the
+accounts against one database and watched the second overwrite the first. Namespacing then
+orphaned the cursor on the existing database and the agent quietly refetched three weeks, so
+it reads the old key once and carries it forward. What is left is the
 loop: a priority queue keyed on each account's posting rate, so a busy one polls every minute
 and a quiet one drifts to fifteen, under one shared budget.
 

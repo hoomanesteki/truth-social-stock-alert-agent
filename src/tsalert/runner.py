@@ -22,8 +22,7 @@ def _last_seen_key(account: str) -> str:
 
     One shared key works fine for a single account and silently breaks the
     moment there are two: whichever polled last overwrites the other's high
-    water mark, and the other one skips everything in between. Existing
-    single account databases keep the bare key.
+    water mark, and the other one skips everything in between.
     """
     return f"{_LAST_SEEN_KEY}:{account}" if account else _LAST_SEEN_KEY
 _UNDETECTED_BACKLOG_LIMIT = 50
@@ -81,7 +80,7 @@ class AgentRunner:
         for post in self.store.undetected_posts(limit=_UNDETECTED_BACKLOG_LIMIT):
             self._detect_and_dispatch(post, time_it=False)
 
-        since_id = self.store.get_state(_last_seen_key(self.account))
+        since_id = self._read_since_id()
 
         try:
             # A single transient blip (one dropped connection, one 5xx) is
@@ -142,6 +141,22 @@ class AgentRunner:
             self.dispatcher.dispatch_ops(alarm.name, alarm.detail)
 
         return new_count
+
+    def _read_since_id(self) -> str | None:
+        """Read the polling cursor, falling back to the pre namespace key.
+
+        Namespacing the key orphaned the cursor in any database written
+        before the change, and the agent quietly restarted from the top of
+        the timeline. Read the old key once and carry it forward.
+        """
+        key = _last_seen_key(self.account)
+        value = self.store.get_state(key)
+        if value is not None or key == _LAST_SEEN_KEY:
+            return value
+        legacy = self.store.get_state(_LAST_SEEN_KEY)
+        if legacy is not None:
+            self.store.set_state(key, legacy)
+        return legacy
 
     def _detect_and_dispatch(self, post: Post, *, time_it: bool = True) -> None:
         """Run one post through the detector, persist it, dispatch if it hits.
