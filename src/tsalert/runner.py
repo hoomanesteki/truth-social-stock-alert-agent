@@ -46,8 +46,15 @@ class AgentRunner:
         interval: AdaptiveInterval,
         sleep: Callable[[float], None] = time.sleep,
         account: str = "",
+        prime_without_alerting: bool = False,
     ) -> None:
         self.account = account
+        # A brand new database has an empty alerts table, so every post the
+        # first poll happens to return looks unsent and gets delivered. That
+        # is how you end up messaging someone twenty times for posts they
+        # already know about. When this is set, the first poll records what
+        # it sees and moves the cursor without alerting.
+        self.prime_without_alerting = prime_without_alerting
         self.source = source
         self.alerts_sent = 0
         # Set when a source asks us to back off for longer than the retry
@@ -112,6 +119,12 @@ class AgentRunner:
 
         new_count = 0
         last_id = since_id
+        priming = self.prime_without_alerting and since_id is None
+        if priming:
+            logger.info(
+                "first poll on an empty store, recording %d post(s) without alerting",
+                len(posts),
+            )
         try:
             for post in posts:
                 if last_id is None or id_sort_key(post.id) > id_sort_key(last_id):
@@ -121,7 +134,7 @@ class AgentRunner:
                 if not is_new:
                     continue
 
-                self._detect_and_dispatch(post)
+                self._detect_and_dispatch(post, alert=not priming)
                 new_count += 1
         except (ValueError, TypeError) as exc:
             # An unexpected id shape or malformed post must never kill the
@@ -158,7 +171,8 @@ class AgentRunner:
             self.store.set_state(key, legacy)
         return legacy
 
-    def _detect_and_dispatch(self, post: Post, *, time_it: bool = True) -> None:
+    def _detect_and_dispatch(self, post: Post, *, time_it: bool = True,
+                             alert: bool = True) -> None:
         """Run one post through the detector, persist it, dispatch if it hits.
 
         Shared by the new-post loop and the undetected-backlog recovery pass
@@ -184,7 +198,7 @@ class AgentRunner:
                 fetched_at=post.fetched_at.isoformat(),
                 detected_at=datetime.now(timezone.utc).isoformat(),
             )
-        if detection.is_stock_related:
+        if detection.is_stock_related and alert:
             self.dispatcher.dispatch(post, detection)
             self.alerts_sent += 1
 

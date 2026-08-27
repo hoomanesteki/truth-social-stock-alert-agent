@@ -211,9 +211,15 @@ def cmd_run(args: argparse.Namespace, config: Config) -> int:
             base=config.poll_interval_seconds,
             max_interval=config.quiet_poll_interval_seconds,
         )
+        # A fresh database against a live source would alert on whatever the
+        # first page happens to contain, which is a burst of messages about
+        # posts the recipient already saw. Replays are exempt: alerting is the
+        # whole point of the demo.
+        is_replay = source_name in ("fixture", "demo")
         runner = AgentRunner(
             source, detector, dispatcher, store, monitor, interval,
             account=config.account,
+            prime_without_alerting=not is_replay,
         )
 
         print(f"Source: {source_name}")

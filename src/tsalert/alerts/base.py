@@ -44,9 +44,17 @@ def _truncate(text: str) -> str:
 def format_alert(post: Post, detection: Detection, sentiment: Sentiment | None = None) -> str:
     tickers = ", ".join(m.ticker for m in detection.mentions)
     companies = ", ".join(m.company for m in detection.mentions)
-    # Report the strongest match's confidence, since that is the one that
-    # actually decided whether this alert fired.
-    confidence = max((m.confidence for m in detection.mentions), default=0.0)
+    # How each ticker was found, which is the part that varies and the part
+    # worth knowing at a glance. A cashtag is near certain, a bare ticker that
+    # only cleared the ambiguity gate much less so. The confidence number this
+    # replaced was the same 0.85 on almost every alert, because that is what
+    # an alias match scores, so it read like a measurement while telling you
+    # nothing.
+    methods = {m.method for m in detection.mentions}
+    if len(methods) == 1:
+        matched = methods.pop()
+    else:
+        matched = ", ".join(f"{m.ticker} by {m.method}" for m in detection.mentions)
     # detection_text (text plus quoted_text) is what the detector actually
     # ran on. A quote post can carry no words of its own, so using post.text
     # here would deliver an alert whose entire body is the bare RT link.
@@ -60,7 +68,7 @@ def format_alert(post: Post, detection: Detection, sentiment: Sentiment | None =
         f"STOCK MENTION: {tickers}\n"
         f"companies: {companies}\n"
         f"posted: {_format_timestamp(post.created_at)}\n"
-        f"detected: {detection.detector} (confidence {confidence:.2f})\n"
+        f"matched: {matched} ({detection.detector})\n"
         f"{sentiment_line}"
         f"\n"
         f"{body}\n"

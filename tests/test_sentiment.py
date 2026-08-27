@@ -118,7 +118,7 @@ def test_score_rejects_invalid_label():
         pass
 
 
-def test_format_alert_with_sentiment_none_is_byte_identical_to_before():
+def test_format_alert_without_sentiment_has_no_sentiment_line():
     post = make_post()
     detection = make_detection()
 
@@ -126,7 +126,7 @@ def test_format_alert_with_sentiment_none_is_byte_identical_to_before():
         "STOCK MENTION: DJT, TSLA\n"
         "companies: Trump Media, Tesla\n"
         "posted: 2026-08-25 18:32 UTC\n"
-        "detected: rules (confidence 0.95)\n"
+        "matched: cashtag (rules)\n"
         "\n"
         "Big news for the company today.\n"
         "\n"
