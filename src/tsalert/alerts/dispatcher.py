@@ -19,7 +19,7 @@ _BACKOFF_JITTER = 0.2
 
 
 class AlertDispatcher:
-    """Sends alerts through every configured channel, exactly once per post
+    """Sends alerts through every configured channel, at least once per post
     per channel, and records what happened so a retry never duplicates a
     delivery.
     """

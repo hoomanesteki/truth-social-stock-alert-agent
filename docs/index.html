@@ -65,7 +65,7 @@ signs off with his own initials, and talks about markets constantly without ever
   <div class="stat"><b>1,260</b><span>posts collected, 45 days</span></div>
   <div class="stat"><b>0</b><span>cashtags in all of them</span></div>
   <div class="stat"><b>37%</b><span>posts with no text at all</span></div>
-  <div class="stat"><b>30%</b><span>signed "President DJT"</span></div>
+  <div class="stat"><b>60</b><span>posts signed "President DJT"</span></div>
 </div>
 
 <h2>Getting the data</h2>
@@ -162,29 +162,35 @@ useful for finding weaknesses but wrong to fold into the headline numbers, so th
 reported on their own.</p>
 
 <h3>What the numbers mean</h3>
+<p>These are for the arm that actually ships, where the rules propose and the model confirms.
+The rules alone score 0.88 precision and 0.80 recall on the same data.</p>
 <dl>
-  <dt>Precision, 0.88</dt>
-  <dd>Of the alerts it sends, 88% are real. The other 12% are wasted attention.</dd>
-  <dt>Recall, 0.80</dt>
-  <dd>Of the real mentions, it catches 80%. The rest are not flagged.</dd>
-  <dt>Confidence interval, 0.56 to 0.97</dt>
-  <dd>The range the true score plausibly sits in. It is wide because only 15 posts in the whole
+  <dt>Precision, 1.00</dt>
+  <dd>Every alert it sent on this sample was a real mention. Read that as a small sample rather
+  than a promise, which is what the interval below is for.</dd>
+  <dt>Recall, 0.74</dt>
+  <dd>Of the real mentions, it catches roughly three in four. The rest are not flagged.</dd>
+  <dt>Confidence interval, 0.60 to 1.00</dt>
+  <dd>The range the true F1 plausibly sits in. It is wide because only 15 posts in the whole
   sample were genuine mentions, and small samples give imprecise answers. Reporting a single
   number here would suggest more certainty than the data supports.</dd>
   <dt>Traps, 25 of 25</dt>
   <dd>Every lookalike was correctly ignored.</dd>
 </dl>
 
-<p class="note">The two misses are both explainable. One names S&amp;P Global, which is not in the
-lookup table, so it could never have been caught. The other is a bare link with the company
-name only in the URL, and URLs are deliberately ignored to avoid matching site names.</p>
+<p class="note">Both misses are explainable. One is a bare link with the company name only in the
+URL, and URLs are deliberately ignored so that site names do not become false alarms. The other is a
+threat to sue the New York Times, which is a public company, so the label counts it. Complaints
+about the New York Times as a newspaper are the single most common false alarm on this account,
+and the suppression that stops those also stops this one. S&amp;P Global used to be a third, until the
+lookup table grew to cover the S&amp;P 500.</p>
 
 <h2>Speed</h2>
 <table>
   <tr><th>Stage</th><th class="num">Time</th></tr>
   <tr><td>Post appears, agent fetches it</td><td class="num">26 to 154 s</td></tr>
   <tr><td>Deciding whether it is a mention</td><td class="num">7 ms</td></tr>
-  <tr><td>Sending the alert</td><td class="num">0.3 ms</td></tr>
+  <tr><td>Handing the alert to the console</td><td class="num">0.3 ms</td></tr>
 </table>
 <p>Almost all of the delay is waiting for the next poll. Detection and delivery are effectively
 free, so the only thing worth tuning is how often to check, and that trades directly against how
@@ -193,9 +199,9 @@ much load is placed on someone else's servers.</p>
 <h2>Being a reasonable guest</h2>
 <p>The site has no API and no stated permission for this, so the polling is deliberately
 conservative: at least 2.5 seconds between requests, never more than 600 in an hour, one request
-at a time, and it waits as long as it is told to after being rate limited. Checking every minute
-during a busy period and backing off to five minutes when quiet cuts the daily request count by
-about two thirds while barely affecting how fast alerts arrive.</p>
+at a time, and it waits as long as it is told to after being rate limited. Checking every 30 seconds
+when busy and backing off to a minute when quiet keeps alerts inside a minute while keeping the
+request rate predictable.</p>
 
 <h2>What I would fix next</h2>
 <table>
@@ -210,7 +216,7 @@ about two thirds while barely affecting how fast alerts arrive.</p>
 </table>
 
 <footer>
-  <p>Prototype. Python, three dependencies, 231 tests that run without network access.
+  <p>Prototype. Python, two dependencies, 231 tests that run without network access.
   Full write-up and source in the repository.</p>
 </footer>
 

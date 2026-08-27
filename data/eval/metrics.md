@@ -3,8 +3,8 @@
 labeled file: data/eval/labeled.jsonl
 labeled rows found: 150
 eval sample rows: 150
-LLM prelabels: 150 rows from data/eval/prelabels.jsonl
-model that produced the scored LLM predictions: openai/gpt-oss-120b
+LLM prelabels: 150 rows from data/eval/predictions_qwen.jsonl
+model that produced the scored LLM predictions: qwen/qwen3.6-27b
 That is the model the llm and combined arms are scored on here. It is not necessarily the model the agent runs at detection time, which agent.py configures separately.
 labeled rows matched to a sample row: 150
 sample rows with no label yet: 0 of 150
@@ -16,19 +16,13 @@ labeled rows counted toward headline (weighted) metrics: 125
   unweighted (on-sample, n=125): precision=0.875 recall=0.933 f1=0.903 (tp=14 fp=2 fn=1 tn=108)
   bootstrap 95% CI (2000 resamples, seed 42): precision=[0.688, 1.000] recall=[0.480, 1.000] f1=[0.602, 1.000]
 ### llm arm
-  weighted:   precision=1.000 recall=1.000 f1=1.000 (tp=17.6 fp=0.0 fn=0.0)
-  unweighted (on-sample, n=125): precision=1.000 recall=1.000 f1=1.000 (tp=15 fp=0 fn=0 tn=110)
-  bootstrap 95% CI (2000 resamples, seed 42): precision=[1.000, 1.000] recall=[1.000, 1.000] f1=[1.000, 1.000]
-  WARNING: this arm's predictions match the ground truth labels on 150/150 labeled rows, without a single disagreement.
-  That is not a measurement of the arm. The labels derive from these very
-  predictions, so precision and recall here are computing x == x and can only
-  come out perfect. A bootstrap CI of exactly [1.000, 1.000] is the same fact
-  restated: no resample of a set containing zero errors can produce one.
-  Treat these numbers as a consistency check on the label file, not as a score.
-### combined arm
-  weighted:   precision=1.000 recall=0.795 f1=0.886 (tp=14.0 fp=0.0 fn=3.6)
+  weighted:   precision=1.000 recall=0.943 f1=0.971 (tp=16.6 fp=0.0 fn=1.0)
   unweighted (on-sample, n=125): precision=1.000 recall=0.933 f1=0.966 (tp=14 fp=0 fn=1 tn=110)
-  bootstrap 95% CI (2000 resamples, seed 42): precision=[1.000, 1.000] recall=[0.480, 1.000] f1=[0.648, 1.000]
+  bootstrap 95% CI (2000 resamples, seed 42): precision=[1.000, 1.000] recall=[0.800, 1.000] f1=[0.889, 1.000]
+### combined arm
+  weighted:   precision=1.000 recall=0.738 f1=0.849 (tp=13.0 fp=0.0 fn=4.6)
+  unweighted (on-sample, n=125): precision=1.000 recall=0.867 f1=0.929 (tp=13 fp=0 fn=2 tn=110)
+  bootstrap 95% CI (2000 resamples, seed 42): precision=[1.000, 1.000] recall=[0.432, 1.000] f1=[0.603, 1.000]
   note: this is the arm the agent actually ships. It fires only where the rule arm
   produced a candidate and the LLM then confirmed it, so the cascade can only remove
   a rule positive, never recover a rule false negative. Its recall is therefore
@@ -44,23 +38,17 @@ labeled rows counted toward headline (weighted) metrics: 125
   precision=0.870 recall=0.653 f1=0.746 (tp=20.0 fp=3.0 fn=10.6)
   exact ticker set: 12/15 stock related posts
 ### llm arm
-  precision=1.000 recall=0.967 f1=0.983 (tp=29.6 fp=0.0 fn=1.0)
-  exact ticker set: 14/15 stock related posts
+  precision=0.922 recall=0.771 f1=0.840 (tp=23.6 fp=2.0 fn=7.0)
+  exact ticker set: 8/15 stock related posts
 ### combined arm
-  precision=0.900 recall=0.882 f1=0.891 (tp=27.0 fp=3.0 fn=3.6)
-  exact ticker set: 14/15 stock related posts
+  precision=0.844 recall=0.882 f1=0.862 (tp=27.0 fp=5.0 fn=3.6)
+  exact ticker set: 12/15 stock related posts
 
 ## Circularity check (arm predictions vs the ground truth labels)
   Agreement over every labeled row, not just the headline strata. High agreement is expected. Total agreement means the labels came from the arm.
   rules: 147/150 rows agree (0.980)
-  llm: 150/150 rows agree (1.000)
-    WARNING: this arm's predictions match the ground truth labels on 150/150 labeled rows, without a single disagreement.
-    That is not a measurement of the arm. The labels derive from these very
-    predictions, so precision and recall here are computing x == x and can only
-    come out perfect. A bootstrap CI of exactly [1.000, 1.000] is the same fact
-    restated: no resample of a set containing zero errors can produce one.
-    Treat these numbers as a consistency check on the label file, not as a score.
-  combined: 149/150 rows agree (0.993)
+  llm: 149/150 rows agree (0.993)
+  combined: 148/150 rows agree (0.987)
 
 ## Suppression report (hard_negative trap stratum)
 ### rules arm
@@ -77,10 +65,9 @@ labeled rows counted toward headline (weighted) metrics: 125
   correctly stayed quiet: 25/25
 
 ## Blind subset comparison (LLM arm only)
-  blind=true  (n=25): precision=1.000 recall=1.000 f1=1.000
+  blind=true  (n=25): precision=1.000 recall=0.500 f1=0.667
   blind=false (n=100): precision=1.000 recall=1.000 f1=1.000
-  gap (blind=false f1 minus blind=true f1): 0.000
-  This split cannot show anything while the LLM arm matches the labels on every row. Both halves are perfect for the same reason, so the gap of zero measures nothing.
+  gap (blind=false f1 minus blind=true f1): 0.333
 
 ## Error analysis
 ### rules arm
@@ -94,11 +81,14 @@ labeled rows counted toward headline (weighted) metrics: 125
 ### llm arm
   false positives (0):
     none
-  false negatives (0):
-    none
+  false negatives (1):
+    stratum=candidate (1):
+      [116902264897167883] Maggot Hagerman has covered me incorrectly for ten years. Her book is a joke! 90% of it is Fake News...
 ### combined arm
   false positives (0):
     none
-  false negatives (1):
+  false negatives (2):
+    stratum=candidate (1):
+      [116902264897167883] Maggot Hagerman has covered me incorrectly for ten years. Her book is a joke! 90% of it is Fake News...
     stratum=random (1):
       [116986556826955994] https://www.cnbc.com/2026/07/23/google-1-billion-eu-fine-dma.html

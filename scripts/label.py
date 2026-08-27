@@ -50,12 +50,7 @@ KEY_TO_CATEGORY = {
     "n": "not_financial",
 }
 
-CATEGORY_IS_STOCK_RELATED = {
-    "specific_equity": True,
-    "index_or_etf": False,
-    "macro_market": False,
-    "not_financial": False,
-}
+from tsalert.detect.policy import CATEGORY_IS_STOCK_RELATED  # noqa: E402
 
 KEY_LEGEND = """keys:
   y  accept the proposal as is (non-blind only)

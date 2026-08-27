@@ -2,7 +2,7 @@
 """Compute precision, recall and F1 for the rule, LLM and combined arms.
 
     uv run python scripts/evaluate.py --labeled data/eval/labeled.jsonl \
-        --sample data/eval/eval_sample.jsonl --prelabels data/eval/prelabels.jsonl
+        --sample data/eval/eval_sample.jsonl --predictions data/eval/predictions_qwen.jsonl
 
 Human labeling of data/eval/labeled.jsonl happens outside this script and can
 still be in progress when this runs. That file may not exist yet, or may
@@ -98,7 +98,9 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         "--sample", default="data/eval/eval_sample.jsonl", help="stratified eval sample, JSONL"
     )
     parser.add_argument(
-        "--prelabels", default="data/eval/prelabels.jsonl", help="LLM prelabels, JSONL"
+        "--predictions", "--prelabels", dest="prelabels",
+        default="data/eval/predictions_qwen.jsonl",
+        help="model predictions to score, JSONL. Defaults to the model the agent runs."
     )
     parser.add_argument(
         "--lexicon", default=str(_DEFAULT_LEXICON_PATH), help="ticker lexicon CSV for the rule arm"

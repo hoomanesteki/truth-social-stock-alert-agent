@@ -41,7 +41,7 @@ Every failure below was tested by forcing it, not just handled in principle.
 | Groq unavailable | The LLM arm falls back to the rule verdict and the agent keeps alerting |
 | Sentiment model fails | The alert goes out without the sentiment line |
 | Telegram down | Console still delivers. Telegram is retried later, since delivery is tracked per channel rather than per post |
-| Process dies mid delivery | The alert is re-sent on the next poll. Idempotency keys on post and channel, so nothing goes twice |
+| Process dies mid delivery | The alert is re-sent on the next poll. The claim is keyed on post and channel, so a restart cannot repeat what already completed. Delivery is at least once, not exactly once |
 | Process dies before detection | The next poll re-checks anything left undetected, so it is still caught |
 
 ## Demo and write-up
@@ -107,8 +107,10 @@ One page on `http.server`, no new dependency. It shows:
 - a ticker filterable mentions feed
 - health and latency, reusing `latency_report.py`'s own maths
 - precision, recall and F1 read from `data/eval/metrics.md` when it exists
-- the ticker lexicon editor The page renders once, then a small script polls `GET /api/state` every 10 seconds
-and updates in place, so nothing you are mid way through typing gets wiped by a refresh.
+- the ticker lexicon editor
+
+The page renders once, then a small script polls `GET /api/state` every 10 seconds and updates
+in place, so nothing you are mid way through typing gets wiped by a refresh.
 
 `is_running()` checks the recorded pid with `os.kill(pid, 0)` rather than trusting the pid
 file, so a stale file left behind by a crash is reported as stopped instead of lying that
@@ -117,8 +119,6 @@ to the store and survive a restart of the dashboard itself.
 
 It is local only, binds to 127.0.0.1 by default, and has no authentication, so it must
 never be exposed to a network.
-
-Reproducing the data and evaluation:
 
 ### Reproducing the evaluation
 
@@ -163,24 +163,24 @@ The image is 261MB and the default command needs no network, so `docker run --rm
 ## 1. Approach
 
 Truth Social runs a Mastodon fork, so its web client calls
-`/api/v1/accounts/{id}/statuses`. Clean JSON, and `min_id` returns only what is new. The
-obstacle is Cloudflare: `requests` and `curl` both get 403. Impersonating a browser's TLS
-fingerprint gets through, `curl_cffi` set to `safari17_0`. Chrome is still blocked, so I found
-that by trial, not by understanding their rules.
+`/api/v1/accounts/{id}/statuses`: clean JSON, and `min_id` returns only what is new. The
+obstacle is Cloudflare, which 403s both `requests` and `curl`. Impersonating a browser's TLS
+fingerprint gets through, `curl_cffi` set to `safari17_0`. Chrome is still blocked, so that came
+from trial rather than from understanding their rules.
 
 | Option | Verdict |
 | --- | --- |
-| Mastodon JSON + TLS impersonation | **Chosen.** `min_id` returns only new posts, so latency is bounded by the interval. Reliable while the fingerprint holds |
+| Mastodon JSON + TLS impersonation | **Chosen.** Latency is bounded by the poll interval. Reliable while the fingerprint holds |
 | `trumpstruth.org` RSS mirror | **Fallback.** Same status ids, so failover cannot double-alert |
 | Headless browser, aggregators | Rejected. Slower and more brittle, no gain over JSON |
 
 It is also the most fragile, depending on a Cloudflare setting I neither control nor get
 warned about, which is why the mirror sits behind it.
 
-**Polling** floats 30 to 60 seconds, for an alert inside about a minute. Replaying the real
-posting history gives a median wait of 21 seconds and a worst case of 60. That costs volume:
-roughly 1,450 requests a day against 316 for the 60 to 300 range I started with. Latency won,
-and the throttle and hourly cap still bound the worst case.
+**Polling** floats 30 to 60 seconds. Replaying the real posting history gives a median wait of
+21 seconds and a worst case of 60. That costs volume: roughly 1,450 requests a day against 316
+for the 60 to 300 range I started with. Latency won, and the throttle and hourly cap still
+bound the worst case.
 
 **Detection** pairs a rule baseline with an LLM arm over a 531 row table: the S&P 500, eight
 ETFs, and companies he names outside the index. Each row rates its ticker's ambiguity, and
@@ -202,73 +202,74 @@ scored separately). Together they hold 15 real mentions.
 | Arm | Class P / R / F1 | Ticker P / R / F1 | Exact set | Traps |
 | --- | --- | --- | --- | --- |
 | rules | 0.875 / 0.795 / 0.833 | 0.870 / 0.653 / 0.746 | 12/15 | 25/25 |
-| llm | 1.000 / 1.000 / 1.000 | 1.000 / 0.967 / 0.983 | 14/15 | 25/25 |
-| **combined, ships** | 1.000 / 0.795 / 0.886 | 0.900 / 0.882 / 0.891 | 14/15 | 25/25 |
+| llm | 1.000 / 0.943 / 0.971 | 0.922 / 0.771 / 0.840 | 8/15 | 25/25 |
+| **combined, ships** | 1.000 / 0.738 / 0.849 | 0.844 / 0.882 / 0.862 | 12/15 | 25/25 |
 
-Resampling the rule arm puts its F1 between 0.602 and 1.000. Gating the LLM on rule candidates
-lets combined drop a false positive but never recover a miss, so it inherits 0.795 recall and
-buys precision. **I optimised for precision:** a miss costs one alert, a false alarm costs
-trust in every alert after it, and at one real mention a week a feed that cries wolf gets
-muted. Both false positives are one shape, a media outlet cited rather than discussed as a
-business (Fox News; New York Times and NBC). Separating an outlet named as a company from one
-named as a source is the open problem, and the LLM arm gets it right. The remaining miss is a
-company named only inside a URL.
+Resampling puts the shipping arm's F1 between 0.603 and 1.000. **I optimised for precision:** a
+miss costs one alert, a false alarm costs trust in every alert after it, and at one real
+mention a week a feed that cries wolf gets muted. Both rule false positives are one shape, a
+media outlet cited rather than discussed as a business (Fox News; New York Times and NBC),
+which the LLM arm gets right.
 
-**The labels, and the trade-off.** Models pre-labelled and I reviewed by hand.
-`gpt-oss-120b` proposed a label per post, a stronger model adjudicated all 150 against a
-written rubric, a third family relabelled blind and agreed on 149 binary verdicts, and I went
-through every row myself and made the final call. Labelling 150 posts cold would have taken a
-day I did not have; pre-labelling turned it into an afternoon of review.
+The ticker column is where the arms separate, and not the way the headline suggests. The LLM
+wins the yes/no call and loses on naming the companies: 8 of 15 exact sets against the rules'
+12. It agrees a post is about stocks, then lists the wrong one. Gating the LLM on rule
+candidates means combined can drop a false positive but never recover a miss, so it inherits
+the rules' recall and ticker accuracy while keeping the LLM's precision.
 
-The trade-off is independence. Different model families share blind spots, so three agreeing
-is weaker evidence than three people agreeing, and reviewing a proposal anchors you in a way
-labelling cold does not. The effect is measurable: the LLM arm scores 1.000 because the labels
-descend from its own predictions, which measures agreement, not accuracy, and `evaluate.py`
-warns instead of printing that as a result. The rule arm is unaffected, built before any
-labelling happened, so its numbers stand on their own. One more caveat: the scored predictions
-are `gpt-oss-120b` while the agent runs `qwen3.6-27b`.
+**The labels, and the trade-off.** Models pre-labelled and I read every row myself and made
+the final call. `gpt-oss-120b` proposed a label per post, a stronger model adjudicated all 150
+against a written rubric, and a third family relabelled blind and agreed on 149 binary
+verdicts. Labelling cold would have cost a day I did not have; this made it an afternoon.
+
+The trade-off is independence. Model families share blind spots, so three agreeing is weaker
+evidence than three people agreeing, and reviewing a proposal anchors you in a way labelling
+cold does not. One thing is kept clean. The scored LLM arm is `qwen3.6-27b`, the model the
+agent runs, and it never touched the labels. An earlier version scored the labelling model and
+returned 1.000 on all 150 rows, which measured lineage rather than skill. `evaluate.py` now
+warns when an arm agrees with the labels completely. The rule arm predates the labelling
+entirely.
 
 **Latency** over a 90 poll run: 26, 79 and 154 seconds from post to fetch, then 7.4 ms to
-decide and 0.3 ms to hand to the console. Telegram adds a round trip I did not measure
-separately. The poll interval is the whole budget. A fourth sample of 824 seconds is dropped
-as cold start, leaving three, since no other stock post arrived. These come from a live run,
-so `latency_report.py` prints zeros on a fresh clone.
+decide and 0.3 ms to reach the console. Telegram adds a round trip I did not measure. The poll
+interval is the whole budget. Three samples only, since no other stock post arrived and a
+fourth at 824 seconds is a cold start. They come from a live run, so `latency_report.py`
+prints zeros on a fresh clone.
 
 ## 3. Robustness and ethics
 
-The failure table above lists what breaks and what catches it. The quiet ones matter most: a
-changed schema and a stalled poll both look like nothing is wrong, so both raise loudly.
+In the failure table above, the quiet ones matter most: a changed schema and a stalled poll
+both look like nothing is wrong, so both raise loudly.
 
 Delivery is at least once. A post and channel pair is claimed in sqlite before sending, so
-restarts and repeat polls cannot resend, but a crash between Telegram accepting and that being
-recorded will resend. Telegram has no idempotency key to check, and a duplicate beats a miss.
+restarts and repeat polls cannot resend, but a crash between Telegram accepting and that write
+will resend. Telegram has no idempotency key, and a duplicate beats a miss.
 
 Politeness is in code, not a comment promising it: a 2.5 second floor between requests, an
 hourly cap that refuses past 600, `Retry-After` honoured, strictly sequential requests. The
 cap matters most, since backoff stays correct right until a loop bug turns it into a hammer.
 
 This reads public pages with no account and keeps only public post text. The mirror's
-`robots.txt` allows crawling; Truth Social publishes none. Automated access likely conflicts
-with their terms regardless, and impersonating a browser fingerprint works around bot
-protection, which goes past reading a page. Proportionate for a prototype at a request a
-minute. For real use I would want a licensed feed.
+`robots.txt` allows crawling; Truth Social publishes none. Automated access likely conflicts with
+their terms anyway, and impersonating a browser fingerprint works around bot protection, which
+goes past reading a page. Proportionate for a prototype at a request a minute; for real use I
+would want a licensed feed.
 
 ## 4. Limitations and next steps
 
-Media-only posts are invisible; OCR is the answer. The lexicon still caps recall: it holds the
-S&P 500 and eight ETFs, so a foreign or small cap name is unreachable, `TM` for Toyota being
-the one left in the labels. Fifteen positives limit every interval above.
+Media-only posts are invisible; OCR is the answer. The lexicon caps recall: the S&P 500 and
+eight ETFs, so a foreign or small cap name is unreachable, `TM` for Toyota being the one left
+in the labels. Fifteen positives limit every interval above.
 
 **More accounts** is mostly scheduling now. Sources are per account, posts record which one,
-and dedup keys on the status id. The cursor needed fixing, since one global value let a second
-account overwrite the first. What is left is the loop: a priority queue keyed on each account's
-posting rate, so a busy one polls every minute and a quiet one drifts to fifteen.
+and dedup keys on the status id; the cursor needed fixing, since one global value let a second
+account overwrite the first. What is left is a priority queue keyed on each account's posting
+rate, so a busy one polls every minute and a quiet one drifts to fifteen.
 
 **Evaluating in production** without labelling everything: run both arms over live traffic and
-hand-label only where they disagree, which puts effort on the decision boundary and turns each
-alert into a labelling chance. Also watch input drift rather than accuracy. Candidate rate and
-ticker distribution need no labels, and a sharp move in either is the first hint something
-changed.
+hand-label only where they disagree, which puts the effort on the decision boundary. Watch
+input drift too. Candidate rate and ticker distribution need no labels, and a sharp move in
+either is the first hint something changed.
 
 ## Repository layout
 

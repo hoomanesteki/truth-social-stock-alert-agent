@@ -8,8 +8,11 @@ from tsalert.detect.lexicon import Lexicon
 from tsalert.models import Detection, TickerMention
 
 URL_PATTERN = re.compile(r"https?://\S+")
-CASHTAG_PATTERN = re.compile(r"\$([A-Za-z]{1,5})\b")
-BARE_TICKER_PATTERN = re.compile(r"\b[A-Z]{1,5}\b")
+# Share class suffixes are part of the symbol. Matching only letters turned
+# $BRK.B into BRK, which is not a real symbol, so the alert named a company
+# nobody mentioned instead of simply missing one.
+CASHTAG_PATTERN = re.compile(r"\$([A-Za-z]{1,5}(?:\.[A-Za-z])?)\b")
+BARE_TICKER_PATTERN = re.compile(r"\b[A-Z]{1,5}(?:\.[A-Z])?\b")
 TOKEN_PATTERN = re.compile(r"[A-Za-z0-9']+")
 
 # ---------------------------------------------------------------------------

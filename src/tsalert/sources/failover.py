@@ -23,7 +23,9 @@ class Transition:
 class FailoverSource:
     """Wraps a primary and a fallback source behind one PostSource interface.
 
-    Transitions become an ops alert, so every switch (primary to
+    Transitions are logged at WARNING and recorded on last_transition for the
+    dashboard to read. Nothing dispatches them as an ops alert today, so every
+    switch (primary to
     fallback and back) is logged at WARNING and recorded on last_transition
     for easy observation, not just printed.
     """
