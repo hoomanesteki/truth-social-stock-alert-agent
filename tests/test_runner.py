@@ -500,3 +500,43 @@ def test_retry_after_overrides_the_adaptive_interval(tmp_path):
     store.close()
 
     assert max(slept) >= 900
+
+
+def test_primed_posts_are_never_recovered_as_alerts(tmp_path):
+    """Priming must survive the recovery sweep on later polls.
+
+    Suppressing the alert alone was not enough: priming still saved a stock
+    related detection with no alerts row, so the next poll's recovery pass
+    found it and delivered the whole first page.
+    """
+    store = make_store(tmp_path)
+    dispatcher = FakeDispatcher()
+    runner = make_runner(FixtureSource([DEMO_FIXTURE]), dispatcher, store)
+    runner.prime_without_alerting = True
+
+    runner.poll_once()
+    runner.poll_once()
+    runner.poll_once()
+
+    store.close()
+    assert dispatcher.dispatched == []
+
+
+def test_repeated_transient_failures_raise_the_alarm(tmp_path):
+    """The error streak alarm has to fire without a successful poll first.
+
+    check() used to run only on the success path, so a run of failures raised
+    the counter, never asked the monitor, and the next success reset it.
+    """
+    store = make_store(tmp_path)
+    dispatcher = FakeDispatcher()
+    monitor = HealthMonitor(store, error_threshold=3)
+    runner = AgentRunner(
+        RaisingSource(TransientSourceError("boom")), make_detector(), dispatcher,
+        store, monitor, AdaptiveInterval(base=30, jitter=0.0), sleep=no_sleep,
+    )
+    for _ in range(3):
+        runner.poll_once()
+    store.close()
+
+    assert "repeated_errors" in {name for name, _detail in dispatcher.ops}

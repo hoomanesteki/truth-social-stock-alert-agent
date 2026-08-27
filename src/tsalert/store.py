@@ -26,7 +26,8 @@ CREATE TABLE IF NOT EXISTS posts (
     quoted_text TEXT,
     detected_at TEXT,
     is_stock_related INTEGER,
-    mentions_json TEXT
+    mentions_json TEXT,
+    alert_eligible INTEGER NOT NULL DEFAULT 1
 );
 
 CREATE TABLE IF NOT EXISTS alerts (
@@ -83,6 +84,7 @@ class Store:
         self._conn.execute("PRAGMA journal_mode=WAL")
         self._conn.executescript(SCHEMA_SQL)
         self._migrate_add_quoted_text()
+        self._migrate_add_alert_eligible()
         self._migrate_add_alert_cycles()
         self._conn.commit()
 
@@ -99,6 +101,26 @@ class Store:
         columns = {row[1] for row in self._conn.execute("PRAGMA table_info(alerts)")}
         if "cycles" not in columns:
             self._conn.execute("ALTER TABLE alerts ADD COLUMN cycles INTEGER DEFAULT 0")
+
+    def _migrate_add_alert_eligible(self) -> None:
+        cols = {r["name"] for r in self._conn.execute("PRAGMA table_info(posts)")}
+        if "alert_eligible" not in cols:
+            self._conn.execute(
+                "ALTER TABLE posts ADD COLUMN alert_eligible INTEGER NOT NULL DEFAULT 1"
+            )
+            self._conn.commit()
+
+    def set_alert_eligible(self, post_id: str, eligible: bool) -> None:
+        """Mark whether a post may ever produce an alert.
+
+        Priming and backfill both store real detections for posts nobody wants
+        an alert about. Without a durable flag the recovery sweep cannot tell
+        those apart from a post that crashed before delivery, and sends them.
+        """
+        self._conn.execute(
+            "UPDATE posts SET alert_eligible=? WHERE id=?", (int(eligible), post_id)
+        )
+        self._conn.commit()
 
     def upsert_post(self, post: Post) -> bool:
         cur = self._conn.execute(
@@ -242,9 +264,14 @@ class Store:
         the process died before claim_alert ran. This query is the recovery
         path for exactly that gap: it finds posts dedup already knows about
         that this channel has no record of ever having tried.
+
+        alert_eligible keeps priming and backfill out of it. Those store real
+        detections for posts nobody wants an alert about, and without the flag
+        this query cannot tell them from a post that crashed before delivery.
         """
         rows = self._conn.execute(
             "SELECT id FROM posts WHERE is_stock_related = 1 "
+            "AND COALESCE(alert_eligible, 1) = 1 "
             "AND id NOT IN (SELECT post_id FROM alerts WHERE channel = ?) "
             "ORDER BY created_at ASC LIMIT ?",
             (channel, limit),

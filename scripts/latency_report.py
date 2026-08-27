@@ -45,6 +45,15 @@ def load_rows(db_path: str) -> list[sqlite3.Row]:
     conn = sqlite3.connect(db_path)
     conn.row_factory = sqlite3.Row
     try:
+        tables = {
+            row[0]
+            for row in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")
+        }
+        if "latency" not in tables:
+            # A database the agent has never written to. The README points
+            # people here on a fresh clone, so an empty report beats a
+            # traceback about a missing table.
+            return []
         return conn.execute(
             "SELECT published_at, fetched_at, detected_at, delivered_at FROM latency"
         ).fetchall()

@@ -204,26 +204,35 @@ scored separately). Together they hold 15 real mentions.
 | llm | 1.000 / 1.000 / 1.000 | 1.000 / 0.967 / 0.983 | 14/15 | 25/25 |
 | **combined, ships** | 1.000 / 0.795 / 0.886 | 0.900 / 0.882 / 0.891 | 14/15 | 25/25 |
 
-Resampling the rule arm 2,000 times puts its true F1 between 0.602 and 1.000. Gating the LLM
-on rule candidates lets combined drop a false positive but never recover a miss, so it
-inherits the rules' 0.795 recall by construction; what it buys is precision. **I optimised
-for precision.** A missed post costs one alert, a false one costs trust in every alert after
-it, and at roughly one real mention a week a feed that cries wolf gets muted. The remaining
-miss is a company named only inside a URL, and URLs are stripped before matching.
+Resampling the rule arm 2,000 times puts its F1 between 0.602 and 1.000. Gating the LLM on
+rule candidates lets combined drop a false positive but never recover a miss, so it inherits
+the rules' 0.795 recall; what it buys is precision. **I optimised for precision.** A miss
+costs one alert, a false alarm costs trust in every alert after it, and at roughly one real
+mention a week a feed that cries wolf gets muted.
 
-**The labels.** `gpt-oss-120b` proposed one per post, a stronger model adjudicated all 150
-against a written rubric, a third relabelled blind and agreed on 149, and I reviewed every
-row. The labels are mine, but not independent of the LLM arm: I reviewed its proposals rather
-than labelling cold, and agreeing is weaker than producing, so its 1.000 is not a measurement.
-`evaluate.py` warns when an arm agrees totally. The rule arm predates all of it. The scored
-model is `gpt-oss-120b`; the agent runs `qwen3.6-27b`.
+Both rule false positives are one shape: a media outlet cited rather than discussed as a
+business, matching Fox News in one and New York Times and NBC in another. Telling an outlet
+named as a company from one named as a source is the open problem, and the LLM arm gets it
+right where the rules do not. The remaining miss is a company named only inside a URL.
+
+**The labels, and the trade-off.** Hand labelling 150 posts is slow, so I used frontier
+models and reviewed the output: `gpt-oss-120b` proposed one per post, a stronger model
+adjudicated all 150 against a written rubric, a third family relabelled blind and agreed on
+149 binary verdicts, and I went through every row.
+
+That buys speed and costs independence. Different families still share blind spots, so three
+models agreeing is weaker than three people agreeing, and reviewing a proposal anchors you in
+a way labelling cold does not. The effect is visible: the LLM arm scores 1.000 because the
+labels descend from its own predictions, measuring consistency rather than accuracy.
+`evaluate.py` detects that and warns instead of printing a clean number. The rule arm
+predates the labelling, so its numbers are clean. The scored predictions are also
+`gpt-oss-120b` while the agent runs `qwen3.6-27b`.
 
 **Latency** over a 90 poll run: 26, 79 and 154 seconds from a post appearing to the agent
-fetching it, then 7.4 ms to decide and 0.3 ms to hand to the console, plus a round trip for
-Telegram. The poll interval is the whole budget, which makes backoff a latency decision as
-much as a politeness one. A fourth sample of 824 seconds is dropped as cold start, leaving
-three, because no other stock post arrived. From a live run, so `latency_report.py` prints
-zeros on a fresh clone until you run the agent.
+fetching it, then 7.4 ms to decide and 0.3 ms to hand to the console. Telegram adds a round
+trip I have not measured separately. The poll interval is the whole budget. A fourth sample
+of 824 seconds is dropped as cold start, leaving three, because no other stock post arrived.
+From a live run, so `latency_report.py` prints zeros on a fresh clone.
 
 ## 3. Robustness and ethics
 

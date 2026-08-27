@@ -18,6 +18,7 @@ if str(_SCRIPTS_DIR) not in sys.path:
 
 from prelabel import SYSTEM_PROMPT  # noqa: E402
 
+_MAX_TICKERS = 25
 _REQUIRED_KEYS = ("is_stock_related", "tickers")
 
 
@@ -59,9 +60,32 @@ class LlmDetector:
 
     @staticmethod
     def _validate(label: dict) -> None:
+        """Check types, not just that the keys are present.
+
+        A model returning the string "false" would otherwise be truthy, and a
+        bare string "TSLA" iterates into four one letter tickers. Both are
+        silent: the alert goes out looking normal. Raising instead lets
+        CombinedDetector fall back to the rule verdict.
+        """
+        if not isinstance(label, dict):
+            raise GroqError(f"llm label is {type(label).__name__}, expected an object")
         missing = [key for key in _REQUIRED_KEYS if key not in label]
         if missing:
             raise GroqError(f"llm label missing required keys: {missing}")
+        if not isinstance(label["is_stock_related"], bool):
+            raise GroqError(
+                f"is_stock_related is {type(label['is_stock_related']).__name__}, expected bool"
+            )
+        for key in ("tickers", "companies"):
+            value = label.get(key)
+            if value is None:
+                continue
+            if not isinstance(value, list):
+                raise GroqError(f"{key} is {type(value).__name__}, expected a list")
+            if any(not isinstance(v, str) for v in value):
+                raise GroqError(f"{key} must contain only strings")
+            if len(value) > _MAX_TICKERS:
+                raise GroqError(f"{key} has {len(value)} entries, more than {_MAX_TICKERS}")
 
     def _build_mentions(self, label: dict) -> tuple[TickerMention, ...]:
         tickers = label.get("tickers") or []

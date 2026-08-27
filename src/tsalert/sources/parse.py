@@ -47,9 +47,16 @@ def _parse_created_at(value: Any) -> datetime:
     return parsed.astimezone(timezone.utc)
 
 
-def parse_status(status: dict, source: str, fetched_at: datetime | None = None) -> Post:
+def parse_status(status: object, source: str, fetched_at: datetime | None = None) -> Post:
     if fetched_at is None:
         fetched_at = datetime.now(timezone.utc)
+
+    if not isinstance(status, dict):
+        # A 200 response can still contain nulls or scalars where objects are
+        # expected. Letting that surface as AttributeError skips the ratio
+        # check that decides schema change versus a few bad rows, and ends
+        # the process instead.
+        raise MalformedStatusError(f"status is {type(status).__name__}, expected an object")
 
     outer_id = status.get("id")
     if not isinstance(outer_id, str) or not outer_id:

@@ -109,11 +109,11 @@ class AgentRunner:
                 )
             else:
                 logger.warning("transient source error, will retry next poll: %s", exc)
-            self.monitor.record_poll(ok=False, new_posts=0)
+            self._record_poll(ok=False, new_posts=0)
             return 0
         except PermanentSourceError as exc:
             logger.error("permanent source error: %s", exc)
-            self.monitor.record_poll(ok=False, new_posts=0)
+            self._record_poll(ok=False, new_posts=0)
             self.dispatcher.dispatch_ops("permanent_source_error", str(exc))
             return 0
 
@@ -135,6 +135,11 @@ class AgentRunner:
                     continue
 
                 self._detect_and_dispatch(post, alert=not priming)
+                if priming:
+                    # Record that this one is deliberately not alertable, or the
+                    # recovery sweep finds a stock related post with no alerts
+                    # row next poll and delivers the whole first page.
+                    self.store.set_alert_eligible(post.id, False)
                 new_count += 1
         except (ValueError, TypeError) as exc:
             # An unexpected id shape or malformed post must never kill the
@@ -142,16 +147,13 @@ class AgentRunner:
             # the backstop for anything else in the batch (detector,
             # store) that assumes well formed data.
             logger.error("unexpected data shape while processing a batch: %s", exc)
-            self.monitor.record_poll(ok=False, new_posts=0)
+            self._record_poll(ok=False, new_posts=0)
             return 0
 
         if last_id is not None:
             self.store.set_state(_last_seen_key(self.account), last_id)
 
-        self.monitor.record_poll(ok=True, new_posts=new_count)
-
-        for alarm in self.monitor.check():
-            self.dispatcher.dispatch_ops(alarm.name, alarm.detail)
+        self._record_poll(ok=True, new_posts=new_count)
 
         return new_count
 
@@ -170,6 +172,19 @@ class AgentRunner:
         if legacy is not None:
             self.store.set_state(key, legacy)
         return legacy
+
+    def _record_poll(self, ok: bool, new_posts: int) -> None:
+        """Record the poll and raise whatever alarms it triggered.
+
+        This has to run on the failure paths too. Checking only after a
+        successful poll meant a run of transient errors raised the counter,
+        never asked the monitor about it, and then the next success reset the
+        counter, so repeated_errors could not fire on the one thing it exists
+        to catch.
+        """
+        self.monitor.record_poll(ok=ok, new_posts=new_posts)
+        for alarm in self.monitor.check():
+            self.dispatcher.dispatch_ops(alarm.name, alarm.detail)
 
     def _detect_and_dispatch(self, post: Post, *, time_it: bool = True,
                              alert: bool = True) -> None:
