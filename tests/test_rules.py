@@ -182,14 +182,17 @@ def test_intel_politics_headline_not_intc(detector: RuleDetector):
 # specific_equity, so a mention of one alone must not flip is_stock_related.
 
 
-def test_dow_jones_alone_not_stock_related(detector: RuleDetector):
+def test_dow_jones_counts_as_a_stock_mention(detector: RuleDetector):
+    """Indices and ETFs count. They are tradeable and they have tickers."""
     d = detector.detect("The Dow Jones just crossed 50,000")
-    assert d.is_stock_related is False
+    assert d.is_stock_related is True
+    assert "DIA" in {m.ticker for m in d.mentions}
 
 
-def test_nasdaq_alone_not_stock_related(detector: RuleDetector):
+def test_nasdaq_counts_as_a_stock_mention(detector: RuleDetector):
     d = detector.detect("The Nasdaq hit a record high")
-    assert d.is_stock_related is False
+    assert d.is_stock_related is True
+    assert "QQQ" in {m.ticker for m in d.mentions}
 
 
 def test_index_mention_alongside_company_still_stock_related(detector: RuleDetector):

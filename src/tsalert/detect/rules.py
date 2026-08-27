@@ -184,14 +184,12 @@ class RuleDetector:
             for c in ordered
         )
 
-        # Step 6: is_stock_related if any surviving, non index mention clears
-        # threshold. The label definition puts indices and ETFs in
-        # index_or_etf with is_stock_related FALSE, and an alert has to name
-        # a specific ticker or company, which generic index commentary
-        # ("the Dow Jones just crossed 50,000") does not provide. Index
-        # mentions are still emitted below so the agent can report what it
-        # saw and error analysis can count them.
-        is_stock_related = any(m.confidence >= self.threshold and m.method != "index" for m in mentions)
+        # Step 6: is_stock_related if any surviving mention clears threshold,
+        # indices and ETFs included. The Dow and the S&P are tradeable
+        # instruments with tickers, so "the Dow just crossed 50,000" names
+        # something a reader can act on. They keep method="index" so error
+        # analysis can still separate them from single company mentions.
+        is_stock_related = any(m.confidence >= self.threshold for m in mentions)
         latency_ms = (time.perf_counter() - start_time) * 1000
 
         return Detection(

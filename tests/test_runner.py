@@ -249,10 +249,13 @@ def test_only_stock_related_posts_are_dispatched(tmp_path):
     new_count = runner.poll_once()
 
     assert new_count == total_pages  # every post is new and gets processed
-    assert len(dispatcher.dispatched) == len(DEMO_STOCK_IDS)  # only the stock related ones dispatch
+    # The demo posts that name a company, plus one page1 post naming S&P Global.
+    # Expanding the lexicon to the S&P 500 is what made that one reachable.
+    assert len(dispatcher.dispatched) == len(DEMO_STOCK_IDS) + 1
 
     dispatched_ids = {post.id for post, _detection in dispatcher.dispatched}
-    assert dispatched_ids == DEMO_STOCK_IDS
+    assert DEMO_STOCK_IDS <= dispatched_ids
+    assert dispatched_ids - DEMO_STOCK_IDS == {"117156902282061140"}  # S&P Global
     assert all(detection.is_stock_related for _post, detection in dispatcher.dispatched)
     store.close()
 

@@ -1,96 +1,532 @@
 ticker,company,aliases,ambiguity,ambiguous_aliases,kind,notes
-DJT,Trump Media & Technology Group,Trump Media|Truth Social|TMTG|Trump Media and Technology,high,,equity,ticker collides with Trump's own initials which he uses to sign posts
-TSLA,Tesla,Tesla|Tesla Motors|the electric car company|Musk's car company,low,,equity,
-BA,Boeing,Boeing,medium,,equity,two letter ticker collides with common abbreviations
-AAPL,Apple,Apple|Apple Inc|Apple Computer,low,Apple,equity,company alias Apple collides with the fruit
-ORCL,Oracle,Oracle|Oracle Corporation,low,,equity,
-X,United States Steel,US Steel|U.S. Steel|United States Steel,high,US Steel|U.S. Steel,equity,single letter ticker also refers to Musk's X platform
-NVDA,Nvidia,Nvidia|NVIDIA,low,,equity,
-INTC,Intel,Intel,low,Intel,equity,
-TSM,Taiwan Semiconductor,Taiwan Semiconductor|TSMC,low,,equity,
-AMD,Advanced Micro Devices,AMD,low,,equity,
-QCOM,Qualcomm,Qualcomm,low,,equity,
-MU,Micron,Micron|Micron Technology,medium,,equity,
-SMCI,Super Micro Computer,Super Micro|Supermicro,low,,equity,
-PLTR,Palantir,Palantir,low,,equity,
-META,Meta Platforms,Meta|Facebook|Instagram|WhatsApp,medium,Meta,equity,Meta is also a common English adjective
-GOOGL,Alphabet,Google|Alphabet|YouTube,low,,equity,
-AMZN,Amazon,Amazon,medium,Amazon,equity,Amazon is also a river and a region
-MSFT,Microsoft,Microsoft,low,,equity,
-NFLX,Netflix,Netflix,low,,equity,
-DIS,Disney,Disney|Walt Disney|ABC News|ESPN,medium,,equity,
-CMCSA,Comcast,Comcast|NBC|MSNBC|NBCUniversal,low,,equity,
-FOXA,Fox Corporation,Fox News|Fox Corporation,medium,,equity,Fox is also a surname and an animal
-NYT,New York Times,New York Times|NYT|The Times,medium,,equity,
-WMT,Walmart,Walmart|Wal-Mart,low,,equity,
-TGT,Target,Target,high,Target,equity,Target is an extremely common English noun and verb
-COST,Costco,Costco,high,,equity,COST is a common English noun and verb
-HD,Home Depot,Home Depot,medium,,equity,
-LOW,Lowes,Lowe's|Lowes,high,,equity,LOW is a common English adjective
-NKE,Nike,Nike,low,,equity,
-SBUX,Starbucks,Starbucks,low,,equity,
-MCD,McDonalds,McDonald's|McDonalds,low,,equity,
-KO,Coca-Cola,Coca-Cola|Coke,medium,Coke,equity,
-PEP,PepsiCo,Pepsi|PepsiCo,medium,,equity,
-F,Ford,Ford|Ford Motor,high,Ford,equity,single letter ticker and Ford is a common surname
-GM,General Motors,General Motors|GM,high,,equity,GM also abbreviates general manager and genetically modified
-RIVN,Rivian,Rivian,low,,equity,
-LCID,Lucid,Lucid Motors|Lucid Group,medium,,equity,
-LMT,Lockheed Martin,Lockheed|Lockheed Martin,low,,equity,
-RTX,RTX Corporation,Raytheon|RTX,low,,equity,
-NOC,Northrop Grumman,Northrop|Northrop Grumman,low,,equity,
-GD,General Dynamics,General Dynamics,medium,,equity,
-XOM,Exxon Mobil,Exxon|ExxonMobil,low,,equity,
-CVX,Chevron,Chevron,low,,equity,
-COIN,Coinbase,Coinbase,medium,,equity,coin is a common English noun
-MSTR,Strategy,MicroStrategy|Strategy Inc,medium,,equity,
-JPM,JPMorgan Chase,JPMorgan|JP Morgan|Chase Bank,low,,equity,
-GS,Goldman Sachs,Goldman Sachs|Goldman,low,,equity,
-BAC,Bank of America,Bank of America,low,,equity,
-C,Citigroup,Citigroup|Citibank|Citi,high,,equity,single letter ticker
-WFC,Wells Fargo,Wells Fargo,low,,equity,
-PFE,Pfizer,Pfizer,low,,equity,
-MRNA,Moderna,Moderna,low,,equity,
-JNJ,Johnson & Johnson,Johnson & Johnson|J&J,medium,,equity,
-LLY,Eli Lilly,Eli Lilly|Lilly,low,,equity,
-UNH,UnitedHealth,UnitedHealth|United Health,low,,equity,
-CVS,CVS Health,CVS,low,,equity,
-CAT,Caterpillar,Caterpillar,high,,equity,CAT is a common English noun
-DE,Deere,John Deere|Deere,high,,equity,DE is a common abbreviation for Delaware and German
-GE,General Electric,General Electric,medium,,equity,
-MMM,3M,3M,medium,,equity,
-HON,Honeywell,Honeywell,medium,,equity,
-IBM,IBM,IBM|International Business Machines,low,,equity,
-CRM,Salesforce,Salesforce,medium,,equity,
-T,AT&T,AT&T|ATT,high,,equity,single letter ticker and T is an extremely common token
-VZ,Verizon,Verizon,low,,equity,
-UPS,United Parcel Service,UPS,medium,,equity,UPS also abbreviates uninterruptible power supply
-FDX,FedEx,FedEx|Federal Express,low,,equity,
-DAL,Delta Air Lines,Delta Air Lines|Delta Airlines,medium,Delta,equity,Delta is also a Greek letter and a landform
-UAL,United Airlines,United Airlines,medium,,equity,
-AAL,American Airlines,American Airlines,medium,,equity,
-LUV,Southwest Airlines,Southwest Airlines,high,,equity,LUV reads as an informal spelling of love
-BABA,Alibaba,Alibaba,low,,equity,
-NIO,NIO,NIO,medium,,equity,
-ALL,Allstate,Allstate,high,,equity,ALL is one of the most common English words
-IT,Gartner,Gartner,high,,equity,IT is an extremely common English word and abbreviation
 A,Agilent,Agilent Technologies,high,,equity,single letter and the most common English article
-ON,ON Semiconductor,ON Semiconductor|onsemi,high,,equity,ON is an extremely common English preposition
-SO,Southern Company,Southern Company,high,,equity,SO is an extremely common English conjunction
-GO,Grocery Outlet,Grocery Outlet,high,,equity,GO is an extremely common English verb
+AAL,American Airlines,American Airlines,medium,,equity,
+AAPL,Apple,Apple|Apple Inc|Apple Computer,low,Apple,equity,company alias Apple collides with the fruit
+ABBV,AbbVie,AbbVie,low,,equity,S&P 500 constituent
+ABNB,Airbnb,Airbnb,low,,equity,S&P 500 constituent
+ABT,Abbott Laboratories,Abbott Laboratories,medium,,equity,S&P 500 constituent
+ACGL,Arch Capital Group,Arch Capital|Arch Capital Group,low,,equity,S&P 500 constituent
+ACN,Accenture,Accenture,medium,,equity,S&P 500 constituent
+ADBE,Adobe Inc.,Adobe|Adobe Inc.,low,,equity,S&P 500 constituent
+ADI,Analog Devices,Analog Devices,medium,,equity,S&P 500 constituent
+ADM,Archer Daniels Midland,Archer Daniels Midland,medium,,equity,S&P 500 constituent
+ADP,Automatic Data Processing,Automatic Data Processing,medium,,equity,S&P 500 constituent
+ADSK,Autodesk,Autodesk,low,,equity,S&P 500 constituent
+AEE,Ameren,Ameren,medium,,equity,S&P 500 constituent
+AEP,American Electric Power,American Electric Power,medium,,equity,S&P 500 constituent
+AES,AES Corporation,AES|AES Corporation,medium,,equity,S&P 500 constituent
+AFL,Aflac,Aflac,medium,,equity,S&P 500 constituent
+AIG,American International Group,American International|American International Group,medium,,equity,S&P 500 constituent
+AIZ,Assurant,Assurant,medium,,equity,S&P 500 constituent
+AJG,Arthur J. Gallagher & Co.,Arthur J. Gallagher &|Arthur J. Gallagher & Co.,medium,,equity,S&P 500 constituent
+AKAM,Akamai Technologies,Akamai Technologies,low,,equity,S&P 500 constituent
+ALB,Albemarle Corporation,Albemarle|Albemarle Corporation,medium,,equity,S&P 500 constituent
+ALGN,Align Technology,Align Technology,low,,equity,S&P 500 constituent
+ALL,Allstate,Allstate,high,,equity,ALL is one of the most common English words
+ALLE,Allegion,Allegion,low,,equity,S&P 500 constituent
+AMAT,Applied Materials,Applied Materials,low,,equity,S&P 500 constituent
+AMCR,Amcor,Amcor,low,,equity,S&P 500 constituent
+AMD,Advanced Micro Devices,AMD,low,,equity,
+AME,Ametek,Ametek,medium,,equity,S&P 500 constituent
+AMGN,Amgen,Amgen,low,,equity,S&P 500 constituent
+AMP,Ameriprise Financial,Ameriprise Financial,medium,,equity,S&P 500 constituent
+AMT,American Tower,American Tower,medium,,equity,S&P 500 constituent
+AMZN,Amazon,Amazon,medium,Amazon,equity,Amazon is also a river and a region
+ANET,Arista Networks,Arista Networks,low,,equity,S&P 500 constituent
+AON,Aon plc,Aon|Aon plc,medium,,equity,S&P 500 constituent
+AOS,A. O. Smith,A. O. Smith,medium,,equity,S&P 500 constituent
+APA,APA Corporation,APA|APA Corporation,medium,,equity,S&P 500 constituent
+APD,Air Products,Air Products,medium,,equity,S&P 500 constituent
+APH,Amphenol,Amphenol,medium,,equity,S&P 500 constituent
+APO,Apollo Global Management,Apollo Global Management,medium,,equity,S&P 500 constituent
+APP,AppLovin,AppLovin,medium,,equity,S&P 500 constituent
+APTV,Aptiv,Aptiv,low,,equity,S&P 500 constituent
+ARE,Alexandria Real Estate Equities,Alexandria Real Estate Equities,high,,equity,S&P 500 constituent
+ARES,Ares Management,Ares Management,low,,equity,S&P 500 constituent
+ATO,Atmos Energy,Atmos Energy,medium,,equity,S&P 500 constituent
+AVGO,Broadcom,Broadcom,low,,equity,S&P 500 constituent
+AVY,Avery Dennison,Avery Dennison,medium,,equity,S&P 500 constituent
+AWK,American Water Works,American Water Works,medium,,equity,S&P 500 constituent
+AXON,Axon Enterprise,Axon Enterprise,low,,equity,S&P 500 constituent
+AXP,American Express,American Express,medium,,equity,S&P 500 constituent
+AZO,AutoZone,AutoZone,medium,,equity,S&P 500 constituent
+BA,Boeing,Boeing,medium,,equity,two letter ticker collides with common abbreviations
+BABA,Alibaba,Alibaba,low,,equity,
+BAC,Bank of America,Bank of America,low,,equity,
+BALL,Ball Corporation,Ball|Ball Corporation,low,Ball,equity,S&P 500 constituent
+BAX,Baxter International,Baxter International,medium,,equity,S&P 500 constituent
+BBY,Best Buy,Best Buy,medium,,equity,S&P 500 constituent
+BDX,Becton Dickinson,Becton Dickinson,medium,,equity,S&P 500 constituent
+BEN,Franklin Resources,Franklin Resources,medium,,equity,S&P 500 constituent
+BF.B,Brown–Forman,Brown–Forman,low,,equity,S&P 500 constituent
+BG,Bunge Global,Bunge Global,high,,equity,S&P 500 constituent
 BIG,Big Lots,Big Lots,high,,equity,BIG is a very common English adjective
-KEY,KeyCorp,KeyCorp,high,,equity,KEY is a common English noun
-RUN,Sunrun,Sunrun,high,,equity,RUN is a common English verb
-NOW,ServiceNow,ServiceNow,high,,equity,NOW is an extremely common English adverb
-LOVE,Lovesac,Lovesac,high,,equity,LOVE is a very common English noun and verb
-PLAY,Dave & Busters,Dave & Buster's,high,,equity,PLAY is a common English verb
-TRUE,TrueCar,TrueCar,high,,equity,TRUE is a common English adjective and appears in Truth Social contexts
-FAST,Fastenal,Fastenal,high,,equity,FAST is a common English adjective
-OPEN,Opendoor,Opendoor,high,,equity,OPEN is a very common English adjective and verb
-WELL,Welltower,Welltower,high,,equity,WELL is a very common English word
-HOPE,Hope Bancorp,Hope Bancorp,high,,equity,HOPE is a common English noun and verb
-GOOD,Gladstone Commercial,Gladstone Commercial,high,,equity,GOOD is an extremely common English adjective
+BIIB,Biogen,Biogen,low,,equity,S&P 500 constituent
+BKNG,Booking Holdings,Booking|Booking Holdings,low,,equity,S&P 500 constituent
+BKR,Baker Hughes,Baker Hughes,medium,,equity,S&P 500 constituent
+BLDR,Builders FirstSource,Builders FirstSource,low,,equity,S&P 500 constituent
+BLK,BlackRock,BlackRock,medium,,equity,S&P 500 constituent
+BMY,Bristol Myers Squibb,Bristol Myers Squibb,medium,,equity,S&P 500 constituent
+BNY,BNY Mellon,BNY Mellon,medium,,equity,S&P 500 constituent
+BR,Broadridge Financial Solutions,Broadridge Financial Solutions,high,,equity,S&P 500 constituent
+BRK.B,Berkshire Hathaway,Berkshire Hathaway,low,,equity,S&P 500 constituent
+BRO,Brown & Brown,Brown & Brown,medium,,equity,S&P 500 constituent
+BSX,Boston Scientific,Boston Scientific,medium,,equity,S&P 500 constituent
+BX,Blackstone Inc.,Blackstone|Blackstone Inc.,high,,equity,S&P 500 constituent
+BXP,"BXP, Inc.","BXP|BXP, Inc.",medium,,equity,S&P 500 constituent
+C,Citigroup,Citigroup|Citibank|Citi,high,,equity,single letter ticker
+CAH,Cardinal Health,Cardinal Health,medium,,equity,S&P 500 constituent
+CARR,Carrier Global,Carrier Global,low,,equity,S&P 500 constituent
 CARS,Cars.com,Cars.com,high,,equity,CARS is a common English noun
-SPY,SPDR S&P 500 ETF,S&P 500|SPDR,high,,index_etf,SPY is a common English noun and verb
-QQQ,Invesco QQQ Trust,Nasdaq 100,low,,index_etf,
-DIA,SPDR Dow Jones ETF,Dow Jones|Dow Jones Industrial Average|the Dow,medium,,index_etf,
+CASY,Casey's,Casey's,low,,equity,S&P 500 constituent
+CAT,Caterpillar,Caterpillar,high,,equity,CAT is a common English noun
+CB,Chubb Limited,Chubb Limited,high,,equity,S&P 500 constituent
+CBOE,Cboe Global Markets,Cboe Global Markets,low,,equity,S&P 500 constituent
+CBRE,CBRE Group,CBRE|CBRE Group,low,,equity,S&P 500 constituent
+CCI,Crown Castle,Crown Castle,medium,,equity,S&P 500 constituent
+CCL,Carnival Corporation,Carnival|Carnival Corporation,medium,Carnival,equity,S&P 500 constituent
+CDNS,Cadence Design Systems,Cadence Design Systems,low,,equity,S&P 500 constituent
+CDW,CDW Corporation,CDW|CDW Corporation,medium,,equity,S&P 500 constituent
+CEG,Constellation Energy,Constellation Energy,medium,,equity,S&P 500 constituent
+CF,CF Industries,CF Industries,high,,equity,S&P 500 constituent
+CFG,Citizens Financial Group,Citizens Financial|Citizens Financial Group,medium,,equity,S&P 500 constituent
+CHD,Church & Dwight,Church & Dwight,medium,,equity,S&P 500 constituent
+CHRW,C.H. Robinson,C.H. Robinson,low,,equity,S&P 500 constituent
+CHTR,Charter Communications,Charter Communications,low,,equity,S&P 500 constituent
+CI,Cigna,Cigna,high,,equity,S&P 500 constituent
+CIEN,Ciena,Ciena,low,,equity,S&P 500 constituent
+CINF,Cincinnati Financial,Cincinnati Financial,low,,equity,S&P 500 constituent
+CL,Colgate-Palmolive,Colgate-Palmolive,high,,equity,S&P 500 constituent
+CLX,Clorox,Clorox,medium,,equity,S&P 500 constituent
+CMCSA,Comcast,Comcast|NBC|MSNBC|NBCUniversal,low,,equity,
+CME,CME Group,CME|CME Group,medium,,equity,S&P 500 constituent
+CMG,Chipotle Mexican Grill,Chipotle Mexican Grill,medium,,equity,S&P 500 constituent
+CMI,Cummins,Cummins,medium,,equity,S&P 500 constituent
+CMS,CMS Energy,CMS Energy,medium,,equity,S&P 500 constituent
+CNC,Centene Corporation,Centene|Centene Corporation,medium,,equity,S&P 500 constituent
+CNP,CenterPoint Energy,CenterPoint Energy,medium,,equity,S&P 500 constituent
+COF,Capital One,Capital One,medium,,equity,S&P 500 constituent
+COHR,Coherent Corp.,Coherent|Coherent Corp.,low,,equity,S&P 500 constituent
+COIN,Coinbase,Coinbase,medium,,equity,coin is a common English noun
+COO,Cooper Companies (The),Cooper Companies|Cooper Companies (The),medium,,equity,S&P 500 constituent
+COP,ConocoPhillips,ConocoPhillips,medium,,equity,S&P 500 constituent
+COR,Cencora,Cencora,medium,,equity,S&P 500 constituent
+COST,Costco,Costco,high,,equity,COST is a common English noun and verb
+CPAY,Corpay,Corpay,low,,equity,S&P 500 constituent
+CPRT,Copart,Copart,low,,equity,S&P 500 constituent
+CPT,Camden Property Trust,Camden Property Trust,medium,,equity,S&P 500 constituent
+CRH,CRH plc,CRH|CRH plc,medium,,equity,S&P 500 constituent
+CRL,Charles River Laboratories,Charles River Laboratories,medium,,equity,S&P 500 constituent
+CRM,Salesforce,Salesforce,medium,,equity,
+CRWD,CrowdStrike,CrowdStrike,low,,equity,S&P 500 constituent
+CSCO,Cisco,Cisco,low,,equity,S&P 500 constituent
+CSGP,CoStar Group,CoStar|CoStar Group,low,,equity,S&P 500 constituent
+CSX,CSX Corporation,CSX|CSX Corporation,medium,,equity,S&P 500 constituent
+CTAS,Cintas,Cintas,low,,equity,S&P 500 constituent
+CTSH,Cognizant,Cognizant,low,,equity,S&P 500 constituent
+CTVA,Corteva,Corteva,low,,equity,S&P 500 constituent
+CVNA,Carvana,Carvana,low,,equity,S&P 500 constituent
+CVS,CVS Health,CVS,low,,equity,
+CVX,Chevron,Chevron,low,,equity,
+D,Dominion Energy,Dominion Energy,high,,equity,S&P 500 constituent
+DAL,Delta Air Lines,Delta Air Lines|Delta Airlines,medium,Delta,equity,Delta is also a Greek letter and a landform
+DASH,DoorDash,DoorDash,low,,equity,S&P 500 constituent
+DD,DuPont,DuPont,high,,equity,S&P 500 constituent
+DDOG,Datadog,Datadog,low,,equity,S&P 500 constituent
+DE,Deere,John Deere|Deere,high,,equity,DE is a common abbreviation for Delaware and German
+DECK,Deckers Brands,Deckers Brands,low,,equity,S&P 500 constituent
+DELL,Dell Technologies,Dell Technologies,low,,equity,S&P 500 constituent
+DG,Dollar General,Dollar General,high,,equity,S&P 500 constituent
+DGX,Quest Diagnostics,Quest Diagnostics,medium,,equity,S&P 500 constituent
+DHI,D. R. Horton,D. R. Horton,medium,,equity,S&P 500 constituent
+DHR,Danaher Corporation,Danaher|Danaher Corporation,medium,,equity,S&P 500 constituent
+DIA,SPDR Dow Jones Industrial Average ETF,Dow Jones|Dow Jones Industrial Average|the Dow,medium,,index_etf,"index or ETF, counts as a stock mention per the brief"
+DIS,Disney,Disney|Walt Disney|ABC News|ESPN,medium,,equity,
+DJT,Trump Media & Technology Group,Trump Media|Truth Social|TMTG|Trump Media and Technology,high,,equity,ticker collides with Trump's own initials which he uses to sign posts
+DLR,Digital Realty,Digital Realty,medium,,equity,S&P 500 constituent
+DLTR,Dollar Tree,Dollar Tree,low,,equity,S&P 500 constituent
+DOC,Healthpeak Properties,Healthpeak Properties,medium,,equity,S&P 500 constituent
+DOV,Dover Corporation,Dover|Dover Corporation,medium,,equity,S&P 500 constituent
+DOW,Dow Inc.,Dow|Dow Inc.,medium,,equity,S&P 500 constituent
+DPZ,Domino's,Domino's,medium,,equity,S&P 500 constituent
+DRI,Darden Restaurants,Darden Restaurants,medium,,equity,S&P 500 constituent
+DTE,DTE Energy,DTE Energy,medium,,equity,S&P 500 constituent
+DUK,Duke Energy,Duke Energy,medium,,equity,S&P 500 constituent
+DVA,DaVita,DaVita,medium,,equity,S&P 500 constituent
+DVN,Devon Energy,Devon Energy,medium,,equity,S&P 500 constituent
+DXCM,Dexcom,Dexcom,low,,equity,S&P 500 constituent
+EBAY,eBay Inc.,eBay|eBay Inc.,low,,equity,S&P 500 constituent
+ECHO,EchoStar,EchoStar,low,,equity,S&P 500 constituent
+ECL,Ecolab,Ecolab,medium,,equity,S&P 500 constituent
+ED,Consolidated Edison,Consolidated Edison,high,,equity,S&P 500 constituent
+EFX,Equifax,Equifax,medium,,equity,S&P 500 constituent
+EG,Everest Group,Everest|Everest Group,high,,equity,S&P 500 constituent
+EIX,Edison International,Edison International,medium,,equity,S&P 500 constituent
+EL,Estée Lauder Companies (The),Estée Lauder Companies|Estée Lauder Companies (The),high,,equity,S&P 500 constituent
+ELV,Elevance Health,Elevance Health,medium,,equity,S&P 500 constituent
+EME,Emcor,Emcor,medium,,equity,S&P 500 constituent
+EMR,Emerson Electric,Emerson Electric,medium,,equity,S&P 500 constituent
+EOG,EOG Resources,EOG Resources,medium,,equity,S&P 500 constituent
+EQIX,Equinix,Equinix,low,,equity,S&P 500 constituent
+EQT,EQT Corporation,EQT|EQT Corporation,medium,,equity,S&P 500 constituent
+ERIE,Erie Indemnity,Erie Indemnity,low,,equity,S&P 500 constituent
+ES,Eversource Energy,Eversource Energy,high,,equity,S&P 500 constituent
+ESS,Essex Property Trust,Essex Property Trust,medium,,equity,S&P 500 constituent
+ETN,Eaton Corporation,Eaton|Eaton Corporation,medium,,equity,S&P 500 constituent
+ETR,Entergy,Entergy,medium,,equity,S&P 500 constituent
+EVRG,Evergy,Evergy,low,,equity,S&P 500 constituent
+EW,Edwards Lifesciences,Edwards Lifesciences,high,,equity,S&P 500 constituent
+EXC,Exelon,Exelon,medium,,equity,S&P 500 constituent
+EXE,Expand Energy,Expand Energy,medium,,equity,S&P 500 constituent
+EXPD,Expeditors International,Expeditors International,low,,equity,S&P 500 constituent
+EXPE,Expedia Group,Expedia|Expedia Group,low,,equity,S&P 500 constituent
+EXR,Extra Space Storage,Extra Space Storage,medium,,equity,S&P 500 constituent
+F,Ford,Ford|Ford Motor,high,Ford,equity,single letter ticker and Ford is a common surname
+FANG,Diamondback Energy,Diamondback Energy,low,,equity,S&P 500 constituent
+FAST,Fastenal,Fastenal,high,,equity,FAST is a common English adjective
+FCX,Freeport-McMoRan,Freeport-McMoRan,medium,,equity,S&P 500 constituent
+FDS,FactSet,FactSet,medium,,equity,S&P 500 constituent
+FDX,FedEx,FedEx|Federal Express,low,,equity,
+FDXF,FedEx Freight,FedEx Freight,low,,equity,S&P 500 constituent
+FE,FirstEnergy,FirstEnergy,high,,equity,S&P 500 constituent
+FERG,Ferguson Enterprises,Ferguson Enterprises,low,,equity,S&P 500 constituent
+FFIV,"F5, Inc.","F5|F5, Inc.",low,,equity,S&P 500 constituent
+FICO,Fair Isaac,Fair Isaac,low,,equity,S&P 500 constituent
+FIS,Fidelity National Information Services,Fidelity National Information Services,medium,,equity,S&P 500 constituent
+FISV,Fiserv,Fiserv,low,,equity,S&P 500 constituent
+FITB,Fifth Third Bancorp,Fifth Third Bancorp,low,,equity,S&P 500 constituent
+FIX,Comfort Systems USA,Comfort Systems USA,medium,,equity,S&P 500 constituent
+FLEX,Flex Ltd.,Flex|Flex Ltd.,low,,equity,S&P 500 constituent
+FOX,Fox Corporation (Class B),Fox|Fox Corporation (Class B),medium,,equity,S&P 500 constituent
+FOXA,Fox Corporation,Fox News|Fox Corporation,medium,,equity,Fox is also a surname and an animal
+FRT,Federal Realty Investment Trust,Federal Realty Investment Trust,medium,,equity,S&P 500 constituent
+FSLR,First Solar,First Solar,low,,equity,S&P 500 constituent
+FTNT,Fortinet,Fortinet,low,,equity,S&P 500 constituent
+FTV,Fortive,Fortive,medium,,equity,S&P 500 constituent
+GD,General Dynamics,General Dynamics,medium,,equity,
+GDDY,GoDaddy,GoDaddy,low,,equity,S&P 500 constituent
+GE,General Electric,General Electric,medium,,equity,
+GEHC,GE HealthCare,GE HealthCare,low,,equity,S&P 500 constituent
+GEN,Gen Digital,Gen Digital,medium,,equity,S&P 500 constituent
+GEV,GE Vernova,GE Vernova,medium,,equity,S&P 500 constituent
+GILD,Gilead Sciences,Gilead Sciences,low,,equity,S&P 500 constituent
+GIS,General Mills,General Mills,medium,,equity,S&P 500 constituent
+GL,Globe Life,Globe Life,high,,equity,S&P 500 constituent
+GLD,SPDR Gold Shares,SPDR Gold,medium,,index_etf,"index or ETF, counts as a stock mention per the brief"
+GLW,Corning Inc.,Corning|Corning Inc.,medium,,equity,S&P 500 constituent
+GM,General Motors,General Motors|GM,high,,equity,GM also abbreviates general manager and genetically modified
+GNRC,Generac,Generac,low,,equity,S&P 500 constituent
+GO,Grocery Outlet,Grocery Outlet,high,,equity,GO is an extremely common English verb
+GOOD,Gladstone Commercial,Gladstone Commercial,high,,equity,GOOD is an extremely common English adjective
+GOOG,Alphabet Inc. (Class C),Alphabet|Alphabet Inc. (Class C),low,,equity,S&P 500 constituent
+GOOGL,Alphabet,Google|Alphabet|YouTube,low,,equity,
+GPC,Genuine Parts Company,Genuine Parts|Genuine Parts Company,medium,,equity,S&P 500 constituent
+GPN,Global Payments,Global Payments,medium,,equity,S&P 500 constituent
+GRMN,Garmin,Garmin,low,,equity,S&P 500 constituent
+GS,Goldman Sachs,Goldman Sachs|Goldman,low,,equity,
+GWW,W. W. Grainger,W. W. Grainger,medium,,equity,S&P 500 constituent
+HAL,Halliburton,Halliburton,medium,,equity,S&P 500 constituent
+HAS,Hasbro,Hasbro,high,,equity,S&P 500 constituent
+HBAN,Huntington Bancshares,Huntington Bancshares,low,,equity,S&P 500 constituent
+HCA,HCA Healthcare,HCA Healthcare,medium,,equity,S&P 500 constituent
+HD,Home Depot,Home Depot,medium,,equity,
+HIG,Hartford (The),Hartford|Hartford (The),medium,,equity,S&P 500 constituent
+HII,Huntington Ingalls Industries,Huntington Ingalls Industries,medium,,equity,S&P 500 constituent
+HLT,Hilton Worldwide,Hilton Worldwide,medium,,equity,S&P 500 constituent
+HON,Honeywell,Honeywell,medium,,equity,
+HONA,Honeywell Aerospace,Honeywell Aerospace,low,,equity,S&P 500 constituent
+HOOD,Robinhood Markets,Robinhood Markets,low,,equity,S&P 500 constituent
+HOPE,Hope Bancorp,Hope Bancorp,high,,equity,HOPE is a common English noun and verb
+HPE,Hewlett Packard Enterprise,Hewlett Packard Enterprise,medium,,equity,S&P 500 constituent
+HPQ,HP Inc.,HP|HP Inc.,medium,,equity,S&P 500 constituent
+HRL,Hormel Foods,Hormel Foods,medium,,equity,S&P 500 constituent
+HSIC,Henry Schein,Henry Schein,low,,equity,S&P 500 constituent
+HST,Host Hotels & Resorts,Host Hotels & Resorts,medium,,equity,S&P 500 constituent
+HSY,Hershey Company (The),Hershey|Hershey Company (The),medium,,equity,S&P 500 constituent
+HUBB,Hubbell Incorporated,Hubbell|Hubbell Incorporated,low,,equity,S&P 500 constituent
+HUM,Humana,Humana,medium,,equity,S&P 500 constituent
+HWM,Howmet Aerospace,Howmet Aerospace,medium,,equity,S&P 500 constituent
+IBKR,Interactive Brokers,Interactive Brokers,low,,equity,S&P 500 constituent
+IBM,IBM,IBM|International Business Machines,low,,equity,
+ICE,Intercontinental Exchange,Intercontinental Exchange,high,,equity,S&P 500 constituent
+IDXX,Idexx Laboratories,Idexx Laboratories,low,,equity,S&P 500 constituent
+IEX,IDEX Corporation,IDEX|IDEX Corporation,medium,,equity,S&P 500 constituent
+IFF,International Flavors & Fragrances,International Flavors & Fragrances,medium,,equity,S&P 500 constituent
+INCY,Incyte,Incyte,low,,equity,S&P 500 constituent
+INTC,Intel,Intel,low,Intel,equity,
+INTU,Intuit,Intuit,low,,equity,S&P 500 constituent
+INVH,Invitation Homes,Invitation Homes,low,,equity,S&P 500 constituent
+IP,International Paper,International Paper,high,,equity,S&P 500 constituent
+IQV,IQVIA,IQVIA,medium,,equity,S&P 500 constituent
+IR,Ingersoll Rand,Ingersoll Rand,high,,equity,S&P 500 constituent
+IRM,Iron Mountain,Iron Mountain,medium,,equity,S&P 500 constituent
+ISRG,Intuitive Surgical,Intuitive Surgical,low,,equity,S&P 500 constituent
+IT,Gartner,Gartner,high,,equity,IT is an extremely common English word and abbreviation
+ITW,Illinois Tool Works,Illinois Tool Works,medium,,equity,S&P 500 constituent
+IVZ,Invesco,Invesco,medium,,equity,S&P 500 constituent
+IWM,iShares Russell 2000 ETF,Russell 2000,medium,,index_etf,"index or ETF, counts as a stock mention per the brief"
+J,Jacobs Solutions,Jacobs Solutions,high,,equity,S&P 500 constituent
+JBHT,J.B. Hunt,J.B. Hunt,low,,equity,S&P 500 constituent
+JBL,Jabil,Jabil,medium,,equity,S&P 500 constituent
+JCI,Johnson Controls,Johnson Controls,medium,,equity,S&P 500 constituent
+JKHY,Jack Henry & Associates,Jack Henry & Associates,low,,equity,S&P 500 constituent
+JNJ,Johnson & Johnson,Johnson & Johnson|J&J,medium,,equity,
+JPM,JPMorgan Chase,JPMorgan|JP Morgan|Chase Bank,low,,equity,
+KDP,Keurig Dr Pepper,Keurig Dr Pepper,medium,,equity,S&P 500 constituent
+KEY,KeyCorp,KeyCorp,high,,equity,KEY is a common English noun
+KEYS,Keysight Technologies,Keysight Technologies,low,,equity,S&P 500 constituent
+KHC,Kraft Heinz,Kraft Heinz,medium,,equity,S&P 500 constituent
+KIM,Kimco Realty,Kimco Realty,medium,,equity,S&P 500 constituent
+KKR,KKR & Co.,KKR &|KKR & Co.,medium,,equity,S&P 500 constituent
+KLAC,KLA Corporation,KLA|KLA Corporation,low,,equity,S&P 500 constituent
+KMB,Kimberly-Clark,Kimberly-Clark,medium,,equity,S&P 500 constituent
+KMI,Kinder Morgan,Kinder Morgan,medium,,equity,S&P 500 constituent
+KO,Coca-Cola,Coca-Cola|Coke,medium,Coke,equity,
+KR,Kroger,Kroger,high,,equity,S&P 500 constituent
+KVUE,Kenvue,Kenvue,low,,equity,S&P 500 constituent
+L,Loews Corporation,Loews|Loews Corporation,high,,equity,S&P 500 constituent
+LCID,Lucid,Lucid Motors|Lucid Group,medium,,equity,
+LDOS,Leidos,Leidos,low,,equity,S&P 500 constituent
+LEN,Lennar,Lennar,medium,,equity,S&P 500 constituent
+LH,Labcorp,Labcorp,high,,equity,S&P 500 constituent
+LHX,L3Harris,L3Harris,medium,,equity,S&P 500 constituent
+LII,Lennox International,Lennox International,medium,,equity,S&P 500 constituent
+LIN,Linde plc,Linde|Linde plc,medium,,equity,S&P 500 constituent
+LITE,Lumentum,Lumentum,low,,equity,S&P 500 constituent
+LLY,Eli Lilly,Eli Lilly|Lilly,low,,equity,
+LMT,Lockheed Martin,Lockheed|Lockheed Martin,low,,equity,
+LNT,Alliant Energy,Alliant Energy,medium,,equity,S&P 500 constituent
+LOVE,Lovesac,Lovesac,high,,equity,LOVE is a very common English noun and verb
+LOW,Lowes,Lowe's|Lowes,high,,equity,LOW is a common English adjective
+LRCX,Lam Research,Lam Research,low,,equity,S&P 500 constituent
+LULU,Lululemon Athletica,Lululemon Athletica,low,,equity,S&P 500 constituent
+LUV,Southwest Airlines,Southwest Airlines,high,,equity,LUV reads as an informal spelling of love
+LVS,Las Vegas Sands,Las Vegas Sands,medium,,equity,S&P 500 constituent
+LYB,LyondellBasell,LyondellBasell,medium,,equity,S&P 500 constituent
+LYV,Live Nation Entertainment,Live Nation Entertainment,medium,,equity,S&P 500 constituent
+MA,Mastercard,Mastercard,high,,equity,S&P 500 constituent
+MAA,Mid-America Apartment Communities,Mid-America Apartment Communities,medium,,equity,S&P 500 constituent
+MAR,Marriott International,Marriott International,medium,,equity,S&P 500 constituent
+MAS,Masco,Masco,medium,,equity,S&P 500 constituent
+MCD,McDonalds,McDonald's|McDonalds,low,,equity,
+MCHP,Microchip Technology,Microchip Technology,low,,equity,S&P 500 constituent
+MCK,McKesson Corporation,McKesson|McKesson Corporation,medium,,equity,S&P 500 constituent
+MCO,Moody's Corporation,Moody's|Moody's Corporation,medium,,equity,S&P 500 constituent
+MDLZ,Mondelez International,Mondelez International,low,,equity,S&P 500 constituent
+MDT,Medtronic,Medtronic,medium,,equity,S&P 500 constituent
+MET,MetLife,MetLife,medium,,equity,S&P 500 constituent
+META,Meta Platforms,Meta|Facebook|Instagram|WhatsApp,medium,Meta,equity,Meta is also a common English adjective
+MGM,MGM Resorts,MGM Resorts,medium,,equity,S&P 500 constituent
+MKC,McCormick & Company,McCormick &|McCormick & Company,medium,,equity,S&P 500 constituent
+MLM,Martin Marietta Materials,Martin Marietta Materials,medium,,equity,S&P 500 constituent
+MMM,3M,3M,medium,,equity,
+MNST,Monster Beverage,Monster Beverage,low,,equity,S&P 500 constituent
+MO,Altria,Altria,high,,equity,S&P 500 constituent
+MOS,Mosaic Company (The),Mosaic|Mosaic Company (The),medium,,equity,S&P 500 constituent
+MPC,Marathon Petroleum,Marathon Petroleum,medium,,equity,S&P 500 constituent
+MPWR,Monolithic Power Systems,Monolithic Power Systems,low,,equity,S&P 500 constituent
+MRK,Merck & Co.,Merck &|Merck & Co.,medium,,equity,S&P 500 constituent
+MRNA,Moderna,Moderna,low,,equity,
+MRSH,Marsh McLennan,Marsh McLennan,low,,equity,S&P 500 constituent
+MRVL,Marvell Technology,Marvell Technology,low,,equity,S&P 500 constituent
+MS,Morgan Stanley,Morgan Stanley,high,,equity,S&P 500 constituent
+MSCI,MSCI,MSCI,low,,equity,S&P 500 constituent
+MSFT,Microsoft,Microsoft,low,,equity,
+MSI,Motorola Solutions,Motorola Solutions,medium,,equity,S&P 500 constituent
+MSTR,Strategy,MicroStrategy|Strategy Inc,medium,,equity,
+MTB,M&T Bank,M&T Bank,medium,,equity,S&P 500 constituent
+MTD,Mettler Toledo,Mettler Toledo,medium,,equity,S&P 500 constituent
+MU,Micron,Micron|Micron Technology,medium,,equity,
+NCLH,Norwegian Cruise Line Holdings,Norwegian Cruise Line|Norwegian Cruise Line Holdings,low,,equity,S&P 500 constituent
+NDAQ,"Nasdaq, Inc.","Nasdaq|Nasdaq, Inc.",low,,equity,S&P 500 constituent
+NDSN,Nordson Corporation,Nordson|Nordson Corporation,low,,equity,S&P 500 constituent
+NEE,NextEra Energy,NextEra Energy,medium,,equity,S&P 500 constituent
+NEM,Newmont,Newmont,medium,,equity,S&P 500 constituent
+NFLX,Netflix,Netflix,low,,equity,
+NI,NiSource,NiSource,high,,equity,S&P 500 constituent
+NIO,NIO,NIO,medium,,equity,
+NKE,Nike,Nike,low,,equity,
+NOC,Northrop Grumman,Northrop|Northrop Grumman,low,,equity,
+NOW,ServiceNow,ServiceNow,high,,equity,NOW is an extremely common English adverb
+NRG,NRG Energy,NRG Energy,medium,,equity,S&P 500 constituent
+NSC,Norfolk Southern,Norfolk Southern,medium,,equity,S&P 500 constituent
+NTAP,NetApp,NetApp,low,,equity,S&P 500 constituent
+NTRS,Northern Trust,Northern Trust,low,,equity,S&P 500 constituent
+NUE,Nucor,Nucor,medium,,equity,S&P 500 constituent
+NVDA,Nvidia,Nvidia|NVIDIA,low,,equity,
+NVR,"NVR, Inc.","NVR|NVR, Inc.",medium,,equity,S&P 500 constituent
+NWS,News Corp (Class B),News|News Corp (Class B),medium,News,equity,S&P 500 constituent
+NWSA,News Corp (Class A),News|News Corp (Class A),low,News,equity,S&P 500 constituent
+NXPI,NXP Semiconductors,NXP Semiconductors,low,,equity,S&P 500 constituent
+NYT,New York Times,New York Times|NYT|The Times,medium,,equity,
+O,Realty Income,Realty Income,high,,equity,S&P 500 constituent
+ODFL,Old Dominion,Old Dominion,low,,equity,S&P 500 constituent
+OKE,Oneok,Oneok,medium,,equity,S&P 500 constituent
+OMC,Omnicom Group,Omnicom|Omnicom Group,medium,,equity,S&P 500 constituent
+ON,ON Semiconductor,ON Semiconductor|onsemi,high,,equity,ON is an extremely common English preposition
+OPEN,Opendoor,Opendoor,high,,equity,OPEN is a very common English adjective and verb
+ORCL,Oracle,Oracle|Oracle Corporation,low,,equity,
+ORLY,O'Reilly Automotive,O'Reilly Automotive,low,,equity,S&P 500 constituent
+OTIS,Otis Worldwide,Otis Worldwide,low,,equity,S&P 500 constituent
+OXY,Occidental Petroleum,Occidental Petroleum,medium,,equity,S&P 500 constituent
+PANW,Palo Alto Networks,Palo Alto Networks,low,,equity,S&P 500 constituent
+PAYX,Paychex,Paychex,low,,equity,S&P 500 constituent
+PCAR,Paccar,Paccar,low,,equity,S&P 500 constituent
+PCG,PG&E Corporation,PG&E|PG&E Corporation,medium,,equity,S&P 500 constituent
+PEG,Public Service Enterprise Group,Public Service Enterprise|Public Service Enterprise Group,medium,,equity,S&P 500 constituent
+PEP,PepsiCo,Pepsi|PepsiCo,medium,,equity,
+PFE,Pfizer,Pfizer,low,,equity,
+PFG,Principal Financial Group,Principal Financial|Principal Financial Group,medium,,equity,S&P 500 constituent
+PG,Procter & Gamble,Procter & Gamble,high,,equity,S&P 500 constituent
+PGR,Progressive Corporation,Progressive|Progressive Corporation,medium,Progressive,equity,S&P 500 constituent
+PH,Parker Hannifin,Parker Hannifin,high,,equity,S&P 500 constituent
+PHM,PulteGroup,PulteGroup,medium,,equity,S&P 500 constituent
+PKG,Packaging Corporation of America,Packaging Corporation of America,medium,,equity,S&P 500 constituent
+PLAY,Dave & Busters,Dave & Buster's,high,,equity,PLAY is a common English verb
+PLD,Prologis,Prologis,medium,,equity,S&P 500 constituent
+PLTR,Palantir,Palantir,low,,equity,
+PM,Philip Morris International,Philip Morris International,high,,equity,S&P 500 constituent
+PNC,PNC Financial Services,PNC Financial Services,medium,,equity,S&P 500 constituent
+PNR,Pentair,Pentair,medium,,equity,S&P 500 constituent
+PNW,Pinnacle West Capital,Pinnacle West Capital,medium,,equity,S&P 500 constituent
+PODD,Insulet Corporation,Insulet|Insulet Corporation,low,,equity,S&P 500 constituent
+PPG,PPG Industries,PPG Industries,medium,,equity,S&P 500 constituent
+PPL,PPL Corporation,PPL|PPL Corporation,medium,,equity,S&P 500 constituent
+PRU,Prudential Financial,Prudential Financial,medium,,equity,S&P 500 constituent
+PSA,Public Storage,Public Storage,medium,,equity,S&P 500 constituent
+PSKY,Paramount Skydance Corporation,Paramount Skydance|Paramount Skydance Corporation,low,,equity,S&P 500 constituent
+PSX,Phillips 66,Phillips 66,medium,,equity,S&P 500 constituent
+PTC,PTC Inc.,PTC|PTC Inc.,medium,,equity,S&P 500 constituent
+PWR,Quanta Services,Quanta Services,medium,,equity,S&P 500 constituent
+PYPL,PayPal,PayPal,low,,equity,S&P 500 constituent
+Q,Qnity Electronics,Qnity Electronics,high,,equity,S&P 500 constituent
+QCOM,Qualcomm,Qualcomm,low,,equity,
+QQQ,Invesco QQQ Trust,Nasdaq 100|the Nasdaq,low,,index_etf,"index or ETF, counts as a stock mention per the brief"
+RCL,Royal Caribbean Group,Royal Caribbean|Royal Caribbean Group,medium,,equity,S&P 500 constituent
+RDDT,Reddit,Reddit,low,,equity,S&P 500 constituent
+REG,Regency Centers,Regency Centers,medium,,equity,S&P 500 constituent
+REGN,Regeneron Pharmaceuticals,Regeneron Pharmaceuticals,low,,equity,S&P 500 constituent
+RF,Regions Financial Corporation,Regions Financial|Regions Financial Corporation,high,,equity,S&P 500 constituent
+RIVN,Rivian,Rivian,low,,equity,
+RJF,Raymond James Financial,Raymond James Financial,medium,,equity,S&P 500 constituent
+RL,Ralph Lauren Corporation,Ralph Lauren|Ralph Lauren Corporation,high,,equity,S&P 500 constituent
+RMD,ResMed|,ResMed|,medium,,equity,S&P 500 constituent
+ROK,Rockwell Automation,Rockwell Automation,medium,,equity,S&P 500 constituent
+ROL,"Rollins, Inc.","Rollins|Rollins, Inc.",medium,,equity,S&P 500 constituent
+ROP,Roper Technologies,Roper Technologies,medium,,equity,S&P 500 constituent
+ROST,Ross Stores,Ross Stores,low,,equity,S&P 500 constituent
+RSG,Republic Services,Republic Services,medium,,equity,S&P 500 constituent
+RTX,RTX Corporation,Raytheon|RTX,low,,equity,
+RUN,Sunrun,Sunrun,high,,equity,RUN is a common English verb
+RVTY,Revvity,Revvity,low,,equity,S&P 500 constituent
+SBAC,SBA Communications,SBA Communications,low,,equity,S&P 500 constituent
+SBUX,Starbucks,Starbucks,low,,equity,
+SCHW,Charles Schwab Corporation,Charles Schwab|Charles Schwab Corporation,low,,equity,S&P 500 constituent
+SHW,Sherwin-Williams,Sherwin-Williams,medium,,equity,S&P 500 constituent
+SJM,J.M. Smucker Company (The),J.M. Smucker|J.M. Smucker Company (The),medium,,equity,S&P 500 constituent
+SLB,Schlumberger,Schlumberger,medium,,equity,S&P 500 constituent
+SMCI,Super Micro Computer,Super Micro|Supermicro,low,,equity,
+SNA,Snap-on,Snap-on,medium,,equity,S&P 500 constituent
+SNDK,Sandisk,Sandisk,low,,equity,S&P 500 constituent
+SNPS,Synopsys,Synopsys,low,,equity,S&P 500 constituent
+SO,Southern Company,Southern Company,high,,equity,SO is an extremely common English conjunction
+SOLV,Solventum,Solventum,low,,equity,S&P 500 constituent
+SPG,Simon Property Group,Simon Property|Simon Property Group,medium,,equity,S&P 500 constituent
+SPGI,S&P Global,S&P Global,low,,equity,S&P 500 constituent
+SPY,SPDR S&P 500 ETF Trust,S&P 500|SPDR S&P 500|the S&P,high,,index_etf,"index or ETF, counts as a stock mention per the brief"
+SRE,Sempra,Sempra,medium,,equity,S&P 500 constituent
+STE,Steris,Steris,medium,,equity,S&P 500 constituent
+STLD,Steel Dynamics,Steel Dynamics,low,,equity,S&P 500 constituent
+STT,State Street Corporation,State Street|State Street Corporation,medium,,equity,S&P 500 constituent
+STX,Seagate Technology,Seagate Technology,medium,,equity,S&P 500 constituent
+STZ,Constellation Brands,Constellation Brands,medium,,equity,S&P 500 constituent
+SW,Smurfit Westrock,Smurfit Westrock,high,,equity,S&P 500 constituent
+SWK,Stanley Black & Decker,Stanley Black & Decker,medium,,equity,S&P 500 constituent
+SWKS,Skyworks Solutions,Skyworks Solutions,low,,equity,S&P 500 constituent
+SYF,Synchrony Financial,Synchrony Financial,medium,,equity,S&P 500 constituent
+SYK,Stryker Corporation,Stryker|Stryker Corporation,medium,,equity,S&P 500 constituent
+SYY,Sysco,Sysco,medium,,equity,S&P 500 constituent
+T,AT&T,AT&T|ATT,high,,equity,single letter ticker and T is an extremely common token
+TAP,Molson Coors Beverage Company,Molson Coors Beverage|Molson Coors Beverage Company,medium,,equity,S&P 500 constituent
+TDG,TransDigm Group,TransDigm|TransDigm Group,medium,,equity,S&P 500 constituent
+TDY,Teledyne Technologies,Teledyne Technologies,medium,,equity,S&P 500 constituent
+TECH,Bio-Techne,Bio-Techne,high,,equity,S&P 500 constituent
+TEL,TE Connectivity,TE Connectivity,medium,,equity,S&P 500 constituent
+TER,Teradyne,Teradyne,medium,,equity,S&P 500 constituent
+TFC,Truist Financial,Truist Financial,medium,,equity,S&P 500 constituent
+TGT,Target,Target,high,Target,equity,Target is an extremely common English noun and verb
+TJX,TJX Companies,TJX Companies,medium,,equity,S&P 500 constituent
+TKO,TKO Group Holdings,TKO Group|TKO Group Holdings,medium,,equity,S&P 500 constituent
+TLT,iShares 20+ Year Treasury Bond ETF,iShares Treasury Bond,medium,,index_etf,"index or ETF, counts as a stock mention per the brief"
+TMO,Thermo Fisher Scientific,Thermo Fisher Scientific,medium,,equity,S&P 500 constituent
+TMUS,T-Mobile US,T-Mobile US,low,,equity,S&P 500 constituent
+TPL,Texas Pacific Land Corporation,Texas Pacific Land|Texas Pacific Land Corporation,medium,,equity,S&P 500 constituent
+TPR,"Tapestry, Inc.","Tapestry|Tapestry, Inc.",medium,,equity,S&P 500 constituent
+TRGP,Targa Resources,Targa Resources,low,,equity,S&P 500 constituent
+TRMB,Trimble Inc.,Trimble|Trimble Inc.,low,,equity,S&P 500 constituent
+TROW,T. Rowe Price,T. Rowe Price,low,,equity,S&P 500 constituent
+TRUE,TrueCar,TrueCar,high,,equity,TRUE is a common English adjective and appears in Truth Social contexts
+TRV,Travelers Companies (The),Travelers Companies|Travelers Companies (The),medium,,equity,S&P 500 constituent
+TSCO,Tractor Supply,Tractor Supply,low,,equity,S&P 500 constituent
+TSLA,Tesla,Tesla|Tesla Motors|the electric car company|Musk's car company,low,,equity,
+TSM,Taiwan Semiconductor,Taiwan Semiconductor|TSMC,low,,equity,
+TSN,Tyson Foods,Tyson Foods,medium,,equity,S&P 500 constituent
+TT,Trane Technologies,Trane Technologies,high,,equity,S&P 500 constituent
+TTD,Trade Desk (The),Trade Desk|Trade Desk (The),medium,,equity,S&P 500 constituent
+TTWO,Take-Two Interactive,Take-Two Interactive,low,,equity,S&P 500 constituent
+TXN,Texas Instruments,Texas Instruments,medium,,equity,S&P 500 constituent
+TXT,Textron,Textron,medium,,equity,S&P 500 constituent
+TYL,Tyler Technologies,Tyler Technologies,medium,,equity,S&P 500 constituent
+UAL,United Airlines,United Airlines,medium,,equity,
+UBER,Uber,Uber,low,,equity,S&P 500 constituent
+UDR,"UDR, Inc.","UDR|UDR, Inc.",medium,,equity,S&P 500 constituent
+UHS,Universal Health Services,Universal Health Services,medium,,equity,S&P 500 constituent
+ULTA,Ulta Beauty,Ulta Beauty,low,,equity,S&P 500 constituent
+UNH,UnitedHealth,UnitedHealth|United Health,low,,equity,
+UNP,Union Pacific Corporation,Union Pacific|Union Pacific Corporation,medium,,equity,S&P 500 constituent
+UPS,United Parcel Service,UPS,medium,,equity,UPS also abbreviates uninterruptible power supply
+URI,United Rentals,United Rentals,medium,,equity,S&P 500 constituent
+USB,U.S. Bancorp,U.S. Bancorp,medium,,equity,S&P 500 constituent
+V,Visa Inc.,Visa|Visa Inc.,high,,equity,S&P 500 constituent
+VEEV,Veeva Systems,Veeva Systems,low,,equity,S&P 500 constituent
+VICI,Vici Properties,Vici Properties,low,,equity,S&P 500 constituent
+VLO,Valero Energy,Valero Energy,medium,,equity,S&P 500 constituent
+VLTO,Veralto,Veralto,low,,equity,S&P 500 constituent
+VMC,Vulcan Materials Company,Vulcan Materials|Vulcan Materials Company,medium,,equity,S&P 500 constituent
+VMRK,Vivmark Residential,Vivmark Residential,low,,equity,S&P 500 constituent
+VOO,Vanguard S&P 500 ETF,Vanguard S&P 500,medium,,index_etf,"index or ETF, counts as a stock mention per the brief"
+VRSK,Verisk Analytics,Verisk Analytics,low,,equity,S&P 500 constituent
+VRSN,Verisign,Verisign,low,,equity,S&P 500 constituent
+VRT,Vertiv,Vertiv,medium,,equity,S&P 500 constituent
+VRTX,Vertex Pharmaceuticals,Vertex Pharmaceuticals,low,,equity,S&P 500 constituent
+VST,Vistra Corp.,Vistra|Vistra Corp.,medium,,equity,S&P 500 constituent
+VTI,Vanguard Total Stock Market ETF,Vanguard Total Stock Market,medium,,index_etf,"index or ETF, counts as a stock mention per the brief"
+VTR,Ventas,Ventas,medium,,equity,S&P 500 constituent
+VTRS,Viatris,Viatris,low,,equity,S&P 500 constituent
+VZ,Verizon,Verizon,low,,equity,
+WAB,Wabtec,Wabtec,medium,,equity,S&P 500 constituent
+WAT,Waters Corporation,Waters|Waters Corporation,medium,Waters,equity,S&P 500 constituent
+WBD,Warner Bros. Discovery,Warner Bros. Discovery,medium,,equity,S&P 500 constituent
+WDAY,"Workday, Inc.","Workday|Workday, Inc.",low,,equity,S&P 500 constituent
+WDC,Western Digital,Western Digital,medium,,equity,S&P 500 constituent
+WEC,WEC Energy Group,WEC Energy|WEC Energy Group,medium,,equity,S&P 500 constituent
+WELL,Welltower,Welltower,high,,equity,WELL is a very common English word
+WFC,Wells Fargo,Wells Fargo,low,,equity,
+WM,Waste Management,Waste Management,high,,equity,S&P 500 constituent
+WMB,Williams Companies,Williams Companies,medium,,equity,S&P 500 constituent
+WMT,Walmart,Walmart|Wal-Mart,low,,equity,
+WRB,W. R. Berkley Corporation,W. R. Berkley|W. R. Berkley Corporation,medium,,equity,S&P 500 constituent
+WSM,"Williams-Sonoma, Inc.","Williams-Sonoma|Williams-Sonoma, Inc.",medium,,equity,S&P 500 constituent
+WST,West Pharmaceutical Services,West Pharmaceutical Services,medium,,equity,S&P 500 constituent
+WTW,Willis Towers Watson,Willis Towers Watson,medium,,equity,S&P 500 constituent
+WY,Weyerhaeuser,Weyerhaeuser,high,,equity,S&P 500 constituent
+WYNN,Wynn Resorts,Wynn Resorts,low,,equity,S&P 500 constituent
+X,United States Steel,US Steel|U.S. Steel|United States Steel,high,US Steel|U.S. Steel,equity,single letter ticker also refers to Musk's X platform
+XEL,Xcel Energy,Xcel Energy,medium,,equity,S&P 500 constituent
+XOM,Exxon Mobil,Exxon|ExxonMobil,low,,equity,
+XYL,Xylem Inc.,Xylem|Xylem Inc.,medium,,equity,S&P 500 constituent
+XYZ,"Block, Inc.","Block|Block, Inc.",medium,Block,equity,S&P 500 constituent
+YUM,Yum! Brands,Yum! Brands,medium,,equity,S&P 500 constituent
+ZBH,Zimmer Biomet,Zimmer Biomet,medium,,equity,S&P 500 constituent
+ZBRA,Zebra Technologies,Zebra Technologies,low,,equity,S&P 500 constituent
+ZTS,Zoetis,Zoetis,medium,,equity,S&P 500 constituent

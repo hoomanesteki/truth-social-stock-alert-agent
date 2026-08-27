@@ -35,8 +35,8 @@ class Config:
     account: str = "realDonaldTrump"
     account_id: str = "107780257626128497"
     source: str = "truthsocial_api"
-    poll_interval_seconds: int = 60
-    quiet_poll_interval_seconds: int = 300
+    poll_interval_seconds: int = 30
+    quiet_poll_interval_seconds: int = 60
     impersonate: str = "safari17_0"
     request_timeout: int = 20
     log_level: str = "INFO"

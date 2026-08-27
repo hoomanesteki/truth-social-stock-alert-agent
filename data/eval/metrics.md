@@ -12,9 +12,9 @@ labeled rows counted toward headline (weighted) metrics: 125
 
 ## Headline metrics (candidate + random strata only, hard_negative excluded)
 ### rules arm
-  weighted:   precision=0.867 recall=0.738 f1=0.797 (tp=13.0 fp=2.0 fn=4.6)
-  unweighted (on-sample, n=125): precision=0.867 recall=0.867 f1=0.867 (tp=13 fp=2 fn=2 tn=108)
-  bootstrap 95% CI (2000 resamples, seed 42): precision=[0.667, 1.000] recall=[0.432, 1.000] f1=[0.558, 0.968]
+  weighted:   precision=0.875 recall=0.795 f1=0.833 (tp=14.0 fp=2.0 fn=3.6)
+  unweighted (on-sample, n=125): precision=0.875 recall=0.933 f1=0.903 (tp=14 fp=2 fn=1 tn=108)
+  bootstrap 95% CI (2000 resamples, seed 42): precision=[0.688, 1.000] recall=[0.480, 1.000] f1=[0.602, 1.000]
 ### llm arm
   weighted:   precision=1.000 recall=1.000 f1=1.000 (tp=17.6 fp=0.0 fn=0.0)
   unweighted (on-sample, n=125): precision=1.000 recall=1.000 f1=1.000 (tp=15 fp=0 fn=0 tn=110)
@@ -26,9 +26,9 @@ labeled rows counted toward headline (weighted) metrics: 125
   restated: no resample of a set containing zero errors can produce one.
   Treat these numbers as a consistency check on the label file, not as a score.
 ### combined arm
-  weighted:   precision=1.000 recall=0.738 f1=0.849 (tp=13.0 fp=0.0 fn=4.6)
-  unweighted (on-sample, n=125): precision=1.000 recall=0.867 f1=0.929 (tp=13 fp=0 fn=2 tn=110)
-  bootstrap 95% CI (2000 resamples, seed 42): precision=[1.000, 1.000] recall=[0.432, 1.000] f1=[0.603, 1.000]
+  weighted:   precision=1.000 recall=0.795 f1=0.886 (tp=14.0 fp=0.0 fn=3.6)
+  unweighted (on-sample, n=125): precision=1.000 recall=0.933 f1=0.966 (tp=14 fp=0 fn=1 tn=110)
+  bootstrap 95% CI (2000 resamples, seed 42): precision=[1.000, 1.000] recall=[0.480, 1.000] f1=[0.648, 1.000]
   note: this is the arm the agent actually ships. It fires only where the rule arm
   produced a candidate and the LLM then confirmed it, so the cascade can only remove
   a rule positive, never recover a rule false negative. Its recall is therefore
@@ -41,18 +41,18 @@ labeled rows counted toward headline (weighted) metrics: 125
   over the posts that really are stock related.
 
 ### rules arm
-  precision=0.857 recall=0.588 f1=0.697 (tp=18.0 fp=3.0 fn=12.6)
-  exact ticker set: 11/15 stock related posts
+  precision=0.870 recall=0.653 f1=0.746 (tp=20.0 fp=3.0 fn=10.6)
+  exact ticker set: 12/15 stock related posts
 ### llm arm
   precision=1.000 recall=0.967 f1=0.983 (tp=29.6 fp=0.0 fn=1.0)
   exact ticker set: 14/15 stock related posts
 ### combined arm
-  precision=0.897 recall=0.849 f1=0.872 (tp=26.0 fp=3.0 fn=4.6)
-  exact ticker set: 13/15 stock related posts
+  precision=0.900 recall=0.882 f1=0.891 (tp=27.0 fp=3.0 fn=3.6)
+  exact ticker set: 14/15 stock related posts
 
 ## Circularity check (arm predictions vs the ground truth labels)
   Agreement over every labeled row, not just the headline strata. High agreement is expected. Total agreement means the labels came from the arm.
-  rules: 146/150 rows agree (0.973)
+  rules: 147/150 rows agree (0.980)
   llm: 150/150 rows agree (1.000)
     WARNING: this arm's predictions match the ground truth labels on 150/150 labeled rows, without a single disagreement.
     That is not a measurement of the arm. The labels derive from these very
@@ -60,7 +60,7 @@ labeled rows counted toward headline (weighted) metrics: 125
     come out perfect. A bootstrap CI of exactly [1.000, 1.000] is the same fact
     restated: no resample of a set containing zero errors can produce one.
     Treat these numbers as a consistency check on the label file, not as a score.
-  combined: 148/150 rows agree (0.987)
+  combined: 149/150 rows agree (0.993)
 
 ## Suppression report (hard_negative trap stratum)
 ### rules arm
@@ -88,9 +88,7 @@ labeled rows counted toward headline (weighted) metrics: 125
     stratum=candidate (2):
       [117061655895656555] RT: https://truthsocial.com/users/mrddmia/statuses/117060035123254425Very true! President DJT  My la...
       [116902945158204426] It’s incredible! I win the Election IN A LANDSLIDE against the entire Dumocrat Party, and almost 100...
-  false negatives (2):
-    stratum=candidate (1):
-      [117156902282061140] S&P Global: ‘US Business Is Booming’: https://www.breitbart.com/economy/2026/08/21/biz-is-booming/
+  false negatives (1):
     stratum=random (1):
       [116986556826955994] https://www.cnbc.com/2026/07/23/google-1-billion-eu-fine-dma.html
 ### llm arm
@@ -101,8 +99,6 @@ labeled rows counted toward headline (weighted) metrics: 125
 ### combined arm
   false positives (0):
     none
-  false negatives (2):
-    stratum=candidate (1):
-      [117156902282061140] S&P Global: ‘US Business Is Booming’: https://www.breitbart.com/economy/2026/08/21/biz-is-booming/
+  false negatives (1):
     stratum=random (1):
       [116986556826955994] https://www.cnbc.com/2026/07/23/google-1-billion-eu-fine-dma.html

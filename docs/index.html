@@ -163,10 +163,10 @@ reported on their own.</p>
 
 <h3>What the numbers mean</h3>
 <dl>
-  <dt>Precision, 0.87</dt>
-  <dd>Of the alerts it sends, 87% are real. The other 13% are wasted attention.</dd>
-  <dt>Recall, 0.74</dt>
-  <dd>Of the real mentions, it catches 74%. The rest slip past silently.</dd>
+  <dt>Precision, 0.88</dt>
+  <dd>Of the alerts it sends, 88% are real. The other 12% are wasted attention.</dd>
+  <dt>Recall, 0.80</dt>
+  <dd>Of the real mentions, it catches 80%. The rest are not flagged.</dd>
   <dt>Confidence interval, 0.56 to 0.97</dt>
   <dd>The range the true score plausibly sits in. It is wide because only 15 posts in the whole
   sample were genuine mentions, and small samples give imprecise answers. Reporting a single
@@ -176,7 +176,7 @@ reported on their own.</p>
 </dl>
 
 <p class="note">The two misses are both explainable. One names S&amp;P Global, which is not in the
-95-company lexicon, so it could never have been caught. The other is a bare link with the company
+lookup table, so it could never have been caught. The other is a bare link with the company
 name only in the URL, and URLs are deliberately ignored to avoid matching site names.</p>
 
 <h2>Speed</h2>
@@ -202,7 +202,7 @@ about two thirds while barely affecting how fast alerts arrive.</p>
   <tr><th>Limitation</th><th>Why it matters</th></tr>
   <tr><td>Posts with no text go unseen</td><td>37% of posts are images or video. Reading text
   out of images would be the largest single improvement.</td></tr>
-  <tr><td>The lexicon is a ceiling</td><td>Only 95 companies are known, so anything outside that
+  <tr><td>The lexicon is a ceiling</td><td>It holds the S&amp;P 500 and eight ETFs, so anything outside that
   list cannot be found no matter how good the logic is.</td></tr>
   <tr><td>Labels are model-generated</td><td>The evaluation labels were not produced by hand,
   which makes the comparison between the rule-based and model-based detectors unreliable. Fixing

@@ -174,14 +174,18 @@ that by trial rather than by understanding their rules.
 It is also the most fragile, depending on a Cloudflare setting I neither control nor get
 warned about, which is why the mirror sits behind it.
 
-**Polling** floats 60 to 300 seconds plus jitter, so real delays land near 48 to 360. Quiet
-polls back off, any new post resets to base. Replaying the real history gives 316 requests a
-day against 1,440 for a flat 60 second poll.
+**Polling** floats 30 to 60 seconds. The brief for this is an alert inside about a minute, and
+replaying the real posting history through the interval gives a median wait of 21 seconds and
+a worst case of 60. That costs volume: roughly 1,450 requests a day against 316 for the
+60 to 300 second range I started with. Latency won, and the throttle and hourly cap still
+bound the worst case.
 
-**Detection** pairs a rule baseline with an LLM arm. Each lexicon row rates its ticker's
+**Detection** pairs a rule baseline with an LLM arm over a 531 row lookup table: the S&P 500,
+eight ETFs, and companies he names that are not in the index. Each row rates its ticker's
 ambiguity and riskier ones need more context, because here *trade* and *economy* are ordinary
 political words. Context splits into strong (stock, shares, earnings) and weak. Without that,
-his habit of shouting in capitals turns ALL, BIG and NOW into noise.
+his habit of shouting in capitals turns ALL, BIG and NOW into noise, and at 531 rows so do
+company names like Ball and Progressive.
 
 ## 2. Results
 
@@ -196,16 +200,16 @@ scored separately). Together they hold 15 real mentions.
 
 | Arm | Class P / R / F1 | Ticker P / R / F1 | Exact set | Traps |
 | --- | --- | --- | --- | --- |
-| rules | 0.867 / 0.738 / 0.797 | 0.857 / 0.588 / 0.697 | 11/15 | 25/25 |
+| rules | 0.875 / 0.795 / 0.833 | 0.870 / 0.653 / 0.746 | 12/15 | 25/25 |
 | llm | 1.000 / 1.000 / 1.000 | 1.000 / 0.967 / 0.983 | 14/15 | 25/25 |
-| **combined, ships** | 1.000 / 0.738 / 0.849 | 0.897 / 0.849 / 0.872 | 13/15 | 25/25 |
+| **combined, ships** | 1.000 / 0.795 / 0.886 | 0.900 / 0.882 / 0.891 | 14/15 | 25/25 |
 
-Resampling the rule arm 2,000 times puts its true F1 between 0.558 and 0.968. Gating the LLM
+Resampling the rule arm 2,000 times puts its true F1 between 0.602 and 1.000. Gating the LLM
 on rule candidates lets combined drop a false positive but never recover a miss, so it
-inherits 0.738 recall by construction; what it buys is precision. Both misses are known: one
-post names S&P Global, outside the lexicon, and the other names a company only inside a URL,
-which is stripped. Both false alarms trace to the DJT sign-off the rules exist to suppress,
-not to company names.
+inherits the rules' 0.795 recall by construction; what it buys is precision. **I optimised
+for precision.** A missed post costs one alert, a false one costs trust in every alert after
+it, and at roughly one real mention a week a feed that cries wolf gets muted. The remaining
+miss is a company named only inside a URL, and URLs are stripped before matching.
 
 **The labels.** `gpt-oss-120b` proposed one per post, a stronger model adjudicated all 150
 against a written rubric, a third relabelled blind and agreed on 149, and I reviewed every
@@ -242,10 +246,11 @@ minute seems proportionate for a prototype. For real use I would want a licensed
 
 ## 4. Limitations and next steps
 
-Media-only posts are invisible; OCR is the answer. The lexicon caps recall, since the labels
-contain `SPGI`, `V`, `TM` and `TMUS`, none among the 95 rows. Fifteen positives limit every
-interval above, and reviewing proposals rather than labelling cold leaves the comparison
-leaning on the arm it judges.
+Media-only posts are invisible; OCR is the answer. The lexicon still caps recall: it holds the
+S&P 500 plus eight ETFs, so a foreign or small cap name he mentions is unreachable, `TM` for
+Toyota being the one still in the labels. Fifteen positives limit every interval above, and
+reviewing proposals rather than labelling cold leaves the comparison leaning on the arm it
+judges.
 
 **More accounts** is mostly scheduling now. Sources are already per account, posts record
 which one, and dedup keys on the status id. The cursor did need fixing, since one global value

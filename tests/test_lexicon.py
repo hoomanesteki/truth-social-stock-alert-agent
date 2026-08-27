@@ -11,9 +11,9 @@ def load_lexicon() -> Lexicon:
     return Lexicon.load(LEXICON_PATH)
 
 
-def test_loads_all_95_rows():
+def test_loads_every_row():
     lexicon = load_lexicon()
-    assert len(lexicon.tickers) == 95
+    assert len(lexicon.tickers) > 500
 
 
 def test_known_tickers_present():
