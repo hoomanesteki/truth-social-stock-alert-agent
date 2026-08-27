@@ -139,12 +139,11 @@ by 3.62 to stand for the archive, and it is what makes recall measurable. Traps 
 posts a heuristic picked as classic lookalikes, scored on their own because a rule built that
 pool rather than chance.
 
-Weighting candidate and random together, the sample holds 15 real mentions. Two scores are
-reported against those. Classification is the yes or no call: precision is how many alerts
-were real, recall is how many real mentions got caught, F1 balances the two. Ticker scores
-the same way on whether the right company was named, which is half the task. Exact set is
-how many of the 15 got their whole ticker list right, and traps is how many of the 25
-lookalike posts stayed correctly silent.
+Weighting candidate and random together, the sample holds 15 real mentions. Classification is
+the yes or no call: precision is how many alerts were real, recall how many real mentions got
+caught, F1 balances the two. Ticker scores the same way on whether the right company was
+named, which is half the task. Exact set is how many of the 15 got their whole ticker list
+right, traps how many of the 25 lookalikes stayed silent.
 
 | Arm | Class P / R / F1 | Ticker P / R / F1 | Exact set | Traps |
 | --- | --- | --- | --- | --- |
@@ -197,12 +196,11 @@ Media-only posts are invisible; OCR is the obvious answer. The lexicon caps reca
 the labels contain `SPGI`, `V`, `TM` and `TMUS`, none among the 95 rows. The same fifteen positives limit every interval here. And the labels are model generated, so the ML comparison is not
 trustworthy yet.
 
-**More accounts** is mostly scheduling. Sources are already per account, posts carry the
-account, dedup keys on the status id, and the polling cursor is namespaced per account, which
-it was not until I tried two accounts against one database and watched the second overwrite
-the first. What is left is the loop: replace it with a priority queue keyed on each account's
-observed posting rate, so a busy one polls every minute and a quiet one drifts to fifteen,
-under a single shared request budget.
+**More accounts** is mostly scheduling now. Sources are per account, posts carry it, dedup
+keys on the status id, and the polling cursor is namespaced, which it was not until I ran two
+accounts against one database and watched the second overwrite the first. What is left is the
+loop: a priority queue keyed on each account's posting rate, so a busy one polls every minute
+and a quiet one drifts to fifteen, under one shared request budget.
 
 **Evaluating in production without labeling everything.** Run both arms over live traffic and
 hand-label only where they disagree, which puts the effort on the decision boundary and turns
