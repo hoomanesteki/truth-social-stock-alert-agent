@@ -55,7 +55,7 @@ footer{margin-top:64px;padding-top:22px;border-top:1px solid var(--line);color:v
 </header>
 
 <h2>The problem</h2>
-<p class="lede">Alert whenever he posts about a publicly traded company, by ticker or by name.
+<p class="lede">Alert whenever he mentions a company whose shares you could actually go and buy, whether he names it or just gives the ticker.
 Two things make that harder than it sounds.</p>
 <p>Truth Social offers no API, so getting the posts at all is the first problem. And once you
 have them, deciding what counts as a stock mention is genuinely ambiguous. He writes in capitals,
@@ -69,9 +69,12 @@ signs off with his own initials, and talks about markets constantly without ever
 </div>
 
 <h2>Getting the data</h2>
-<p>Truth Social runs a fork of Mastodon, and its own web client talks to a Mastodon-shaped JSON
-endpoint. That endpoint is reachable without an account. The obstacle is Cloudflare, which blocks
-requests by their TLS fingerprint rather than anything in the request itself.</p>
+<p>Truth Social is built on Mastodon, an open source social network that plenty of sites run.
+That means its own app is quietly talking to a fairly ordinary JSON endpoint, and that
+endpoint answers without an account. The obstacle is Cloudflare, a security
+layer sitting in front of the site. It decides whether to block you from subtle technical
+details of how the connection itself gets opened, not from anything about what you are
+actually asking for.</p>
 
 <table>
   <tr><th>Attempt</th><th>Result</th></tr>
@@ -80,9 +83,9 @@ requests by their TLS fingerprint rather than anything in the request itself.</p
   <tr><td><code>curl_cffi</code> impersonating Safari 17</td><td class="yes">200, clean JSON</td></tr>
 </table>
 
-<p class="note">Two impersonation targets, one works and one does not. I found the working one by
-trying a few, not by understanding Cloudflare's rules, which is worth being upfront about because
-it means the approach could stop working without warning.</p>
+<p class="note">Two browsers to imitate, one gets through and one does not. I got there by trial
+and error rather than by working out what Cloudflare actually inspects, and that is worth saying
+plainly: whatever it checks, if they change it this stops working and nothing warns me.</p>
 
 <p>So there is a fallback. An archive site republishes the same posts over RSS, and it happens to
 expose the original Truth Social status id for each one. That detail matters more than it sounds:
@@ -112,7 +115,8 @@ on posts it already sent.</p>
 <rect x="522" y="46" width="112" height="44" rx="6" fill="none" stroke="currentColor"/>
 <text x="578" y="73" text-anchor="middle">alert</text>
 <rect x="522" y="126" width="112" height="44" rx="6" fill="none" stroke="currentColor" opacity=".6"/>
-<text x="578" y="153" text-anchor="middle" opacity=".75">heartbeat</text>
+<text x="578" y="150" text-anchor="middle" opacity=".75">heartbeat</text>
+<text x="578" y="166" text-anchor="middle" opacity=".55" font-size="10">polls fine, nothing arrives</text>
 <text x="70" y="130" text-anchor="middle" opacity=".55" font-size="11">failover on repeated errors</text>
 </g>
 </svg>
@@ -153,8 +157,9 @@ stratified, with each group answering a different question.</p>
 </table>
 
 <p>Every candidate is labeled rather than sampled, so precision is counted exactly instead of
-estimated. The traps are hand-picked to be difficult, which makes them useful for spotting
-weaknesses but wrong to include in the headline numbers, so they are reported on their own.</p>
+estimated. The traps are pulled out by a rule written to catch classic lookalikes, which makes them
+useful for finding weaknesses but wrong to fold into the headline numbers, so they get
+reported on their own.</p>
 
 <h3>What the numbers mean</h3>
 <dl>
@@ -195,7 +200,7 @@ about two thirds while barely affecting how fast alerts arrive.</p>
 <h2>What I would fix next</h2>
 <table>
   <tr><th>Limitation</th><th>Why it matters</th></tr>
-  <tr><td>Media-only posts are invisible</td><td>37% of posts are images or video. Reading text
+  <tr><td>Posts with no text go unseen</td><td>37% of posts are images or video. Reading text
   out of images would be the largest single improvement.</td></tr>
   <tr><td>The lexicon is a ceiling</td><td>Only 95 companies are known, so anything outside that
   list cannot be found no matter how good the logic is.</td></tr>

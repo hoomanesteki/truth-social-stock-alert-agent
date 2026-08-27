@@ -139,11 +139,11 @@ class AgentRunner:
         """
         detection = self.detector.detect(post.detection_text, post.id)
         self.store.save_detection(detection)
-        # Stamp latency on every post that arrives. Only stamping the ones that
-        # alert. Stock mentions are roughly two percent of posts, so waiting
-        # for a delivered alert to sample latency would take days. The
-        # publish to fetch stage is the one bounded by the poll interval and
-        # it dominates the total, so it is the number worth measuring.
+        # Latency gets stamped on every post, including the ones that never
+        # alert. Stock mentions run around two percent, so building a sample
+        # only from delivered alerts would take days. Publish to fetch is the
+        # stage bounded by the poll interval and it dominates the total, so
+        # that is the number worth having.
         self.store.record_latency(
             post.id,
             published_at=post.created_at.isoformat(),

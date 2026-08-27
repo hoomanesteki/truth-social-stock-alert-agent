@@ -112,8 +112,9 @@ I found that by trying a few rather than understanding their rules.
 | `trumpstruth.org` RSS mirror | **Fallback.** Same status ids, so failover cannot double-alert |
 | Headless browser, third-party aggregators | Rejected. Slower and more brittle, no gain over JSON |
 
-It is also the most fragile, depending on a setting I do not control, hence the circuit
-breaker onto the mirror, which is worse: text and ids only.
+It is also the most fragile, depending on a Cloudflare setting I neither control nor get
+warning about. So after enough consecutive failures the agent switches itself to the RSS
+mirror, which carries worse data, just text and ids, but keeps running.
 
 **Polling** floats 60 to 300 seconds plus jitter, so real delays land near 48 to 360. Quiet
 polls back off, any new post resets to base. Replaying the real history gives 305 requests a
@@ -131,12 +132,19 @@ Three facts from the 1,260 post archive shaped everything. There are zero cashta
 at all and are invisible to a text detector. And all 60 bare `DJT` tokens are his sign-off,
 none the ticker.
 
-Base rate is near zero, so uniform sampling would find no positives. The set is stratified:
-candidate (23, a census, so exact precision), random (102, weight 3.62, estimates misses),
-traps (25, scored separately since a heuristic built that pool).
+Stock mentions are rare enough that a random sample of 150 would turn up almost none, so the
+set uses three groups. Candidates (23) are every post the rules flagged, labelled completely
+rather than sampled, so precision on them is exact. Random (102) is a plain sample reweighted
+by 3.62 to stand for the archive, and it is what makes recall measurable. Traps (25) are
+posts a heuristic picked as classic lookalikes, scored on their own because a rule built that
+pool rather than chance.
 
-Weighted over candidate and random, 15 positives. Classification is the yes/no call, ticker
-is which stocks were named, since naming them is half the task:
+Weighting candidate and random together, the sample holds 15 real mentions. Two scores are
+reported against those. Classification is the yes or no call: precision is how many alerts
+were real, recall is how many real mentions got caught, F1 balances the two. Ticker scores
+the same way on whether the right company was named, which is half the task. Exact set is
+how many of the 15 got their whole ticker list right, and traps is how many of the 25
+lookalike posts stayed correctly silent.
 
 | Arm | Class P / R / F1 | Ticker P / R / F1 | Exact set | Traps |
 | --- | --- | --- | --- | --- |
@@ -144,7 +152,8 @@ is which stocks were named, since naming them is half the task:
 | llm | 1.000 / 1.000 / 1.000 | 1.000 / 0.967 / 0.983 | 14/15 | 25/25 |
 | **combined, ships** | 1.000 / 0.738 / 0.849 | 0.897 / 0.849 / 0.872 | 13/15 | 25/25 |
 
-Rule F1 bootstraps to [0.558, 0.968]; fifteen positives cannot support a tighter interval.
+Resampling the rule arm 2,000 times puts its true F1 between 0.558 and 0.968 with 95 percent
+confidence. Fifteen positives cannot pin it down tighter.
 Gating the LLM on rule candidates lets combined drop a false positive but never recover a
 miss, so it inherits 0.738 recall by construction. What it buys is precision. Both misses
 are known: S&P Global is not in the lexicon, and a bare link, since URLs are stripped.
@@ -156,18 +165,19 @@ makes them consistent rather than independent, since every step is a language mo
 `evaluate.py` detects this and warns. A real comparison needs human labels. The scored model
 is also `gpt-oss-120b` while the agent defaults to `qwen3.6-27b`.
 
-**Latency**, over a 90 poll run: published to fetched 26, 79 and 154 seconds, then 7.4 ms to
-detect and 0.3 ms to deliver. The poll interval is the whole budget, which makes backoff a
-latency decision as much as a politeness one. A fourth sample of 824s is excluded as cold
-start, and three samples is thin because no stock post arrived in the window.
+**Latency**, measured over a 90 poll run: three usable samples took 26, 79 and 154 seconds
+from a post going up to the agent fetching it, then 7.4 ms to decide and 0.3 ms to send. The
+poll interval is the whole budget, which makes backoff a latency decision as much as a
+politeness one. A fourth sample at 824 seconds is thrown out as a cold start, leaving three,
+because no other stock post happened to arrive during the run.
 
 ## 3. Robustness and ethics
 
 The quiet failure is the one worth engineering against. A 404 is obvious; a 200 with a
 changed shape is not, and the parser returns empty while everything looks healthy. So a page
 more than half unparseable raises, and a `no_new_posts` heartbeat fires when polls succeed
-but nothing arrives. That alarm state persists, or a restart resets the clock and buries an
-outage. Behind those sit a circuit breaker and error streak alarms, rate limited so nobody
+but nothing arrives. That alarm state is saved to disk, so a restart cannot quietly reset the
+clock and bury an outage. Behind those sit a circuit breaker and error streak alarms, rate limited so nobody
 learns to ignore them.
 
 Politeness is in code: a 2.5 second floor between requests, an hourly cap that refuses past
@@ -178,14 +188,13 @@ hammer.
 This reads public pages with no account and keeps only public post text. The mirror allows
 crawling; Truth Social publishes no `robots.txt`. I would not oversell that: automated access
 likely conflicts with their terms anyway, and impersonating a fingerprint works around bot
-protection, which goes past reading a page. At a request a minute for a prototype that seems
-proportionate. For real use I would want a licensed feed.
+protection, which goes past reading a page. One request a minute seems proportionate for a
+prototype. For real use I would want a licensed feed.
 
 ## 4. Limitations and next steps
 
 Media-only posts are invisible; OCR is the obvious answer. The lexicon caps recall, since
-the labels contain `SPGI`, `V`, `TM` and `TMUS`, none among the 95 rows. Fifteen positives
-makes every interval wide. And the labels are model generated, so the ML comparison is not
+the labels contain `SPGI`, `V`, `TM` and `TMUS`, none among the 95 rows. The same fifteen positives limit every interval here. And the labels are model generated, so the ML comparison is not
 trustworthy yet.
 
 **More accounts** is scheduling, not architecture. Replace the single loop with a priority

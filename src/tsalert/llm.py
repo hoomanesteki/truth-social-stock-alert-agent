@@ -200,10 +200,10 @@ class GroqClient:
 
     @staticmethod
     def _extract_content(data: dict) -> dict:
-        # data here is the outer chat-completion envelope. The model's
-        # answer. Missing structure here means the API contract changed,
-        # not that the model produced a bad answer, so this is never
-        # retried, it is raised straight out of complete_json.
+        # This is the outer chat-completion envelope, not the model's answer.
+        # Missing structure here means the API contract changed rather than
+        # the model replying badly, so it is raised straight out of
+        # complete_json and never retried.
         choices = data.get("choices")
         if not isinstance(choices, list) or not choices:
             raise GroqError("response missing required key: choices")

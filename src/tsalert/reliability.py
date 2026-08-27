@@ -79,8 +79,9 @@ class AdaptiveInterval:
             self._current = self.base
         else:
             self._current = min(self.max_interval, self._current * self.growth)
-        # Jitter only affects what we return here. The stored
-        # state, so repeated quiet polls grow smoothly instead of drifting.
+        # Jitter is applied to the returned delay only. The stored interval
+        # stays clean, so repeated quiet polls grow smoothly rather than
+        # compounding the randomness.
         jittered = self._current * (1 + self._rng.uniform(-self.jitter, self.jitter))
         return max(0.0, jittered)
 
@@ -107,9 +108,10 @@ class CircuitBreaker:
     def record_failure(self) -> None:
         self._consecutive_failures += 1
         if self._consecutive_failures >= self.threshold:
-            # Push opened_at forward on each failure once past threshold. Doing it only on the
-            # first, so a failed half-open probe restarts the full cooldown
-            # instead of letting is_open flip back and forth every call.
+            # Every failure past the threshold pushes opened_at forward, not
+            # just the first one. That way a failed half-open probe restarts
+            # the full cooldown instead of letting is_open flip back and
+            # forth on every call.
             self._opened_at = self._clock()
 
     @property
