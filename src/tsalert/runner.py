@@ -79,7 +79,7 @@ class AgentRunner:
         # backlog from a prior crash does not get pushed further behind by
         # this poll's own new posts.
         for post in self.store.undetected_posts(limit=_UNDETECTED_BACKLOG_LIMIT):
-            self._detect_and_dispatch(post)
+            self._detect_and_dispatch(post, time_it=False)
 
         since_id = self.store.get_state(_last_seen_key(self.account))
 
@@ -143,12 +143,17 @@ class AgentRunner:
 
         return new_count
 
-    def _detect_and_dispatch(self, post: Post) -> None:
+    def _detect_and_dispatch(self, post: Post, *, time_it: bool = True) -> None:
         """Run one post through the detector, persist it, dispatch if it hits.
 
         Shared by the new-post loop and the undetected-backlog recovery pass
         above, so a post recovered after a crash goes through exactly the
         same detect/save/dispatch steps a freshly fetched one does.
+
+        time_it is False for the backlog pass. Those posts were ingested by an
+        earlier run or by the backfill script, so measuring publish to fetch
+        on them reports how old the archive is, and a handful of month old
+        posts drown every real reading in the table.
         """
         detection = self.detector.detect(post.detection_text, post.id)
         self.store.save_detection(detection)
@@ -157,12 +162,13 @@ class AgentRunner:
         # only from delivered alerts would take days. Publish to fetch is the
         # stage bounded by the poll interval and it dominates the total, so
         # that is the number worth having.
-        self.store.record_latency(
-            post.id,
-            published_at=post.created_at.isoformat(),
-            fetched_at=post.fetched_at.isoformat(),
-            detected_at=datetime.now(timezone.utc).isoformat(),
-        )
+        if time_it:
+            self.store.record_latency(
+                post.id,
+                published_at=post.created_at.isoformat(),
+                fetched_at=post.fetched_at.isoformat(),
+                detected_at=datetime.now(timezone.utc).isoformat(),
+            )
         if detection.is_stock_related:
             self.dispatcher.dispatch(post, detection)
             self.alerts_sent += 1

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+from dataclasses import replace
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -411,3 +412,27 @@ def test_polling_cursor_is_kept_per_account(tmp_path):
         store.set_state(_last_seen_key("bob"), "9999")
         assert store.get_state(_last_seen_key("alice")) == "1000"
         assert store.get_state(_last_seen_key("bob")) == "9999"
+
+
+
+def test_backlog_recovery_does_not_stamp_latency(tmp_path):
+    """Archive posts recovered later must stay out of the latency table.
+
+    They were ingested by an earlier run or by the backfill script, so
+    publish to fetch on them measures how old the archive is. A few month
+    old posts bury every real reading.
+    """
+    from datetime import timedelta
+
+    old = datetime.now(timezone.utc) - timedelta(days=44)
+    post = make_plain_post("7001", "just some words")
+    post = replace(post, created_at=old, fetched_at=old)
+
+    store = make_store(tmp_path)
+    store.upsert_post(post)
+    runner = make_runner(EmptySource(), FakeDispatcher(), store)
+    runner.poll_once()
+
+    rows = store._conn.execute("SELECT COUNT(*) FROM latency").fetchone()[0]
+    store.close()
+    assert rows == 0
