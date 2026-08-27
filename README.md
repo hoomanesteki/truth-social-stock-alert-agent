@@ -151,8 +151,8 @@ right, traps how many of the 25 lookalikes stayed silent.
 | llm | 1.000 / 1.000 / 1.000 | 1.000 / 0.967 / 0.983 | 14/15 | 25/25 |
 | **combined, ships** | 1.000 / 0.738 / 0.849 | 0.897 / 0.849 / 0.872 | 13/15 | 25/25 |
 
-Resampling the rule arm 2,000 times puts its true F1 between 0.558 and 0.968 with 95 percent
-confidence. Fifteen positives cannot pin it down tighter.
+Resampling the rule arm 2,000 times puts its true F1 between 0.558 and 0.968 at 95 percent
+confidence. Fifteen positives cannot pin it tighter.
 Gating the LLM on rule candidates lets combined drop a false positive but never recover a
 miss, so it inherits 0.738 recall by construction. What it buys is precision. Both misses
 are known: S&P Global is not in the lexicon, and a bare link, since URLs are stripped.
@@ -192,8 +192,8 @@ prototype. For real use I would want a licensed feed.
 
 ## 4. Limitations and next steps
 
-Media-only posts are invisible; OCR is the obvious answer. The lexicon caps recall, since
-the labels contain `SPGI`, `V`, `TM` and `TMUS`, none among the 95 rows. The same fifteen positives limit every interval here. And the labels are model generated, so the ML comparison is not
+Media-only posts are invisible; OCR is the answer. The lexicon caps recall, since the labels
+contain `SPGI`, `V`, `TM` and `TMUS`, none among the 95 rows. The same fifteen positives limit every interval here. And the labels are model generated, so the ML comparison is not
 trustworthy yet.
 
 **More accounts** is mostly scheduling now. Sources are per account, posts carry it, dedup
