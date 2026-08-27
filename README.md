@@ -149,31 +149,45 @@ stratified and each stratum answers one question:
 Hard negatives are picked to be adversarial, so weighting them onto the population would let
 one call shift the estimate by sixteen posts. They are reported separately.
 
-**Rule baseline**, weighted over candidate and random, 15 positives:
+**Three arms**, weighted over candidate and random, 15 positives. Combined is the cascade
+that actually ships: rules first, LLM only on a rule candidate.
 
-| Metric | Value |
-| --- | --- |
-| Precision | 0.867 |
-| Recall | 0.738 |
-| F1 | 0.797, bootstrap 95% CI [0.558, 0.968] |
-| Trap suppression | 25/25 |
+| Arm | Precision | Recall | F1 (bootstrap 95% CI) | Traps |
+| --- | --- | --- | --- | --- |
+| rules | 0.867 | 0.738 | 0.797 [0.558, 0.968] | 25/25 |
+| llm | 1.000 | 1.000 | 1.000 [1.000, 1.000] | 25/25 |
+| **combined, ships** | 1.000 | 0.738 | 0.849 [0.603, 1.000] | 25/25 |
 
-Both false negatives are known limitations: S&P Global, absent from the 95 lexicon rows, and
-a bare link, since URLs are stripped before matching.
+Combined costs no tokens to score: it fires exactly where the rules produced a candidate and
+the LLM confirmed it, and both are already on disk. Read the recall column. Gating the LLM
+on rule candidates lets the cascade delete a rule false positive but never recover a rule
+miss, so combined inherits the rule arm's 0.738 exactly, by construction rather than by
+luck. The LLM arm gets the bare Google link right on its own and the shipped detector still
+misses it. What the cascade buys is precision.
 
-**How the labels were made.** `gpt-oss-120b` proposes a label for each post, then a stronger
-model adjudicates every row against a written rubric for the recurring hard cases: media
-brands he appears on versus companies as corporate entities, companies named in passing as
-an employer or donor, private companies, and the DJT sign-off. The adjudicator changed 8 of
-150. A third model from another family, `gpt-oss-safeguard-20b`, then relabeled all 150
-blind and agreed on 149, so the labels are stable rather than one model's opinion. The lone
-disagreement is S&P Global cited as the source of a report, a real judgement call.
+Both misses are known limitations: S&P Global, absent from the 95 lexicon rows, and a bare
+link, since URLs are stripped before matching.
 
-**The LLM arm scored 1.000, and that is still not evidence.** Agreement across three models
-makes the labels consistent, not independent of the detector, since every step is a language
-model. Scoring a model against labels a similar model wrote is circular, and the blind
-holdout shows a zero gap for the same reason. A trustworthy comparison needs human labels.
-That is the biggest weakness here, and I would rather say so than report a perfect score.
+**How the labels were made, and why the LLM's 1.000 is not a measurement.** `gpt-oss-120b`
+proposes a label for each post, then a stronger model adjudicates every row against a
+written rubric for the recurring hard cases: media brands he appears on versus companies as
+corporate entities, companies named in passing, private companies, and the DJT sign-off.
+The adjudicator changed 8 of 150, and not one of those 8 flipped `is_stock_related`. So
+`labeled.jsonl` is identical to the LLM arm's own prediction on 150 rows out of 150. That
+1.000 is x == x. The interval of exactly [1.000, 1.000] is the tell: no resample of a set
+holding zero errors can produce one. `evaluate.py` now checks agreement per arm and prints
+that warning instead of a clean number, and combined's 1.000 precision leans on the same
+predictions. A third model, `gpt-oss-safeguard-20b`, relabeled all 150 blind and agreed on
+149, which makes the labels consistent, not independent: every step is a language model.
+The blind holdout shows a zero gap for that same reason. A trustworthy comparison needs
+human labels. That is the biggest weakness here and I would rather say so than report a
+perfect score.
+
+**The evaluated model is not the model the agent runs.** Those predictions are
+`gpt-oss-120b`. The detector defaults to `qwen3.6-27b`, chosen deliberately so the eval is
+not grading a model against labels from its own lineage, which means the combined row above
+describes a cascade whose LLM half the agent does not actually run. `evaluate.py` prints the
+model id it is scoring, read from prelabels.jsonl, so the report says which one it means.
 
 **Latency**, over a 90 poll live run:
 

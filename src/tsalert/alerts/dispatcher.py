@@ -29,13 +29,21 @@ class AlertDispatcher:
         channels: list[AlertChannel],
         store: Store,
         max_attempts: int = 4,
+        max_cycles: int = 5,
         sentiment_scorer: Any = None,
         base_delay: float = 2.0,
         sleep: Callable[[float], None] = time.sleep,
     ) -> None:
         self.channels = channels
         self.store = store
+        # max_attempts bounds sends within a single dispatch/retry call (the
+        # per-call budget _send_with_retries spends on backoff). max_cycles
+        # bounds how many separate retry_failed passes a transient failure
+        # gets over its lifetime. Conflating the two is what let a permanent
+        # failure keep getting retried and a transient one stop being retried
+        # the moment one dispatch call used up its per-call budget.
         self.max_attempts = max_attempts
+        self.max_cycles = max_cycles
         self.sentiment_scorer = sentiment_scorer
         self.base_delay = base_delay
         self.sleep = sleep
@@ -67,7 +75,7 @@ class AlertDispatcher:
             # heartbeat stale) can legitimately fire again later and each
             # occurrence should be delivered, not swallowed by a claim row
             # left over from the first time it fired.
-            ok, attempts, error = self._send_with_retries(channel, text)
+            ok, attempts, error, _permanent = self._send_with_retries(channel, text)
             results.append(
                 DeliveryResult(
                     channel=channel.name,
@@ -86,15 +94,20 @@ class AlertDispatcher:
         claim_alert only guards the first send: once that row exists, no
         future dispatch() call for the same post and channel can get past
         step 1, retries included. Without this method a post that failed
-        every attempt (channel down, transient network trouble) would stay
-        stuck at status='failed' forever, since nothing else ever revisits
-        it. A 'pending' row means claim_alert ran and then the process died
-        before record_alert_result ever did, which is exactly a crash
-        mid-send, so it belongs in the same retry set. Meant to be called
-        at the start of each poll cycle.
+        every attempt for a transient reason (channel down, network trouble)
+        would stay stuck at status='failed' forever, since nothing else ever
+        revisits it. A 'pending' row means claim_alert ran and then the
+        process died before record_alert_result ever did, which is exactly a
+        crash mid-send, so it belongs in the same retry set.
+
+        retryable_alerts already excludes 'permanent_failure' rows by status,
+        so a bad token or bad chat id is never retried here, and bounds the
+        rest by max_cycles (lifetime retry_failed passes), not max_attempts
+        (the per-call send budget). Meant to be called at the start of each
+        poll cycle.
         """
         results = []
-        for post_id, channel_name in self.store.retryable_alerts(self.max_attempts):
+        for post_id, channel_name in self.store.retryable_alerts(self.max_cycles):
             channel = self._find_channel(channel_name)
             if channel is None or not channel.is_configured():
                 continue
@@ -104,7 +117,7 @@ class AlertDispatcher:
             post, detection = loaded
             text = self._format(post, detection)
             detected_at = datetime.now(timezone.utc)
-            results.append(self._send_and_record(post, channel, text, detected_at))
+            results.append(self._send_and_record(post, channel, text, detected_at, is_retry=True))
         return results
 
     def recover_undelivered(self) -> list[DeliveryResult]:
@@ -158,16 +171,28 @@ class AlertDispatcher:
 
 
     def _send_and_record(
-        self, post: Post, channel: AlertChannel, text: str, detected_at: datetime
+        self,
+        post: Post,
+        channel: AlertChannel,
+        text: str,
+        detected_at: datetime,
+        is_retry: bool = False,
     ) -> DeliveryResult:
-        ok, attempts, error = self._send_with_retries(channel, text)
-        status = "delivered" if ok else "failed"
+        ok, attempts, error, permanent = self._send_with_retries(channel, text)
+        if ok:
+            status = "delivered"
+        elif permanent:
+            # Never retryable: retryable_alerts filters on status, so this
+            # keeps a bad token or bad chat id out of every future retry pass.
+            status = "permanent_failure"
+        else:
+            status = "failed"
         # attempts is the real number of sends _send_with_retries performed
         # this call, not 1. Recording anything else would let the stored
         # counter undercount, which is what let attempts < max_attempts
         # bound poll cycles instead of sends.
         self.store.record_alert_result(
-            post.id, channel.name, status, error or None, attempts_made=attempts
+            post.id, channel.name, status, error or None, attempts_made=attempts, is_retry=is_retry
         )
         delivered_at = None
         if ok:
@@ -188,18 +213,24 @@ class AlertDispatcher:
             delivered_at=delivered_at,
         )
 
-    def _send_with_retries(self, channel: AlertChannel, text: str) -> tuple[bool, int, str]:
+    def _send_with_retries(self, channel: AlertChannel, text: str) -> tuple[bool, int, str, bool]:
+        """Send with in-call backoff. Returns (ok, attempts, error, permanent).
+
+        permanent is True only when the loop ended on a PermanentSourceError,
+        which the caller uses to record a status that retry_failed will never
+        pick back up, since retrying a 4xx cannot ever succeed.
+        """
         error = ""
         for attempt in range(1, self.max_attempts + 1):
             try:
                 channel.send(text)
-                return True, attempt, ""
+                return True, attempt, "", False
             except PermanentSourceError as exc:
-                return False, attempt, str(exc)
+                return False, attempt, str(exc), True
             except TransientSourceError as exc:
                 error = str(exc)
                 if attempt >= self.max_attempts:
-                    return False, attempt, error
+                    return False, attempt, error, False
                 retry_after = getattr(exc, "retry_after", None)
                 if retry_after is not None:
                     delay = float(retry_after)
@@ -207,4 +238,4 @@ class AlertDispatcher:
                     cap = min(_MAX_BACKOFF_SECONDS, self.base_delay * (2 ** (attempt - 1)))
                     delay = self._rng.uniform(cap * _BACKOFF_JITTER, cap)
                 self.sleep(delay)
-        return False, self.max_attempts, error  # pragma: no cover
+        return False, self.max_attempts, error, False  # pragma: no cover

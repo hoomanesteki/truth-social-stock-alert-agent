@@ -185,7 +185,9 @@ def test_permanent_error_is_not_retried(tmp_path):
     row = store._conn.execute(
         "SELECT status, attempts FROM alerts WHERE post_id=? AND channel=?", (post.id, "console")
     ).fetchone()
-    assert row["status"] == "failed"
+    # 'permanent_failure' is a distinct terminal status from 'failed': a 4xx
+    # cannot succeed by retrying, so retry_failed must never select this row.
+    assert row["status"] == "permanent_failure"
     store.close()
 
 
@@ -198,23 +200,30 @@ def test_retry_failed_recovers_a_stuck_alert(tmp_path):
     detection = make_detection()
     store.save_detection(detection)
 
-    # The original dispatch uses 3 of the 4 budgeted attempts (two
-    # transient hiccups, then a hard failure) and gives up, leaving the
-    # claim row behind with status='failed' and budget still remaining.
-    # Without retry_failed nothing would ever revisit it, since claim_alert
-    # would refuse a second dispatch.
+    # The original dispatch burns the entire per-call attempts budget on a
+    # channel that is transiently down the whole time, no permanent error
+    # anywhere in the script. This is exactly the case retry_failed exists
+    # for: the channel could simply come back later, so the failure must
+    # stay eligible for retry rather than being written off.
     failing_channel = FakeChannel(
         "console",
         outcomes=[
             TransientSourceError("down"),
             TransientSourceError("down"),
-            PermanentSourceError("misconfigured"),
+            TransientSourceError("down"),
+            TransientSourceError("down"),
         ],
     )
     dispatcher = AlertDispatcher([failing_channel], store, max_attempts=4, sleep=no_sleep)
     first = dispatcher.dispatch(post, detection)
     assert first[0].ok is False
-    assert first[0].attempts == 3
+    assert first[0].attempts == 4
+
+    row = store._conn.execute(
+        "SELECT status, cycles FROM alerts WHERE post_id=? AND channel=?", (post.id, "console")
+    ).fetchone()
+    assert row["status"] == "failed"  # transient, so still eligible for retry_failed
+    assert row["cycles"] == 0  # burning the per-call attempts budget is not a retry_failed pass
 
     second_attempt = dispatcher.dispatch(post, detection)
     assert second_attempt == []  # claim_alert blocks it, proving the stuck state
@@ -234,23 +243,46 @@ def test_retry_failed_recovers_a_stuck_alert(tmp_path):
     store.close()
 
 
-def test_retry_failed_skips_alert_already_at_max_attempts(tmp_path):
+def test_retry_failed_skips_a_permanent_failure(tmp_path):
     store = make_store(tmp_path)
     post = make_post()
     store.upsert_post(post)
     store.save_detection(make_detection())
 
-    store.claim_alert(post.id, "console")
-    store.record_alert_result(post.id, "console", "failed", "boom")
-    store.record_alert_result(post.id, "console", "failed", "boom")
+    channel = FakeChannel("console", outcomes=[PermanentSourceError("bad chat id")])
+    dispatcher = AlertDispatcher([channel], store, max_attempts=4, sleep=no_sleep)
+    dispatcher.dispatch(post, make_detection())
 
-    channel = FakeChannel("console")
-    dispatcher = AlertDispatcher([channel], store, max_attempts=2, sleep=no_sleep)
+    row = store._conn.execute(
+        "SELECT status FROM alerts WHERE post_id=? AND channel=?", (post.id, "console")
+    ).fetchone()
+    assert row["status"] == "permanent_failure"
 
     results = dispatcher.retry_failed()
 
     assert results == []
-    assert channel.sent == []
+    assert len(channel.sent) == 1  # only the original send, retry_failed sent nothing
+    store.close()
+
+
+def test_permanent_failure_is_never_retried_however_many_cycles_pass(tmp_path):
+    store = make_store(tmp_path)
+    post = make_post()
+    store.upsert_post(post)
+    store.save_detection(make_detection())
+
+    channel = FakeChannel("console", outcomes=[PermanentSourceError("bad chat id")])
+    dispatcher = AlertDispatcher([channel], store, max_attempts=4, max_cycles=3, sleep=no_sleep)
+    dispatcher.dispatch(post, make_detection())
+
+    # max_cycles is only 3 here, well under the 10 passes run below. A row
+    # excluded only because it happened to still be under its cycle budget
+    # would eventually get picked up; this proves the exclusion is by
+    # status ('permanent_failure' is simply never selected), not by a
+    # cycle count that would run out sooner or later.
+    for _ in range(10):
+        assert dispatcher.retry_failed() == []
+    assert len(channel.sent) == 1
     store.close()
 
 

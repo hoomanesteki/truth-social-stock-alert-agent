@@ -64,7 +64,16 @@ class TrumpsTruthRssSource:
             threshold = id_sort_key(since_id)
             posts = [p for p in posts if id_sort_key(p.id) > threshold]
         posts.sort(key=lambda p: id_sort_key(p.id))
-        return posts[-limit:] if limit else posts
+        # Oldest limit, not newest: the primary source is safe to take the
+        # newest slice because Mastodon's min_id pages from the oldest side
+        # of the window server side. This feed hands back everything at
+        # once, and this mirror is only used when the primary is down,
+        # which is exactly when a backlog is most likely to exist. Taking
+        # the newest slice under a 30-post backlog with limit=20 would
+        # advance last_seen straight past the oldest 10 and skip them
+        # forever, since the next poll's since_id filter excludes anything
+        # at or before it.
+        return posts[:limit] if limit else posts
 
     def fetch_history(self, before_id: str | None = None, limit: int = 20) -> list[Post]:
         posts = self._fetch_all()

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Compute precision, recall and F1 for the rule and LLM detector arms.
+"""Compute precision, recall and F1 for the rule, LLM and combined arms.
 
     uv run python scripts/evaluate.py --labeled data/eval/labeled.jsonl \
         --sample data/eval/eval_sample.jsonl --prelabels data/eval/prelabels.jsonl
@@ -24,12 +24,35 @@ and has not fixed one):
                     left out of the blind-subset comparison rather than
                     guessed at.
 
-The rule arm is computed live for every labeled row by calling RuleDetector
-straight over the post text pulled from --sample, since no rule-arm
-predictions are stored on disk anywhere. The LLM arm is read from
---prelabels rather than computed live, since prelabel.py already produced it
-independently of the rule detector (see that script's own docstring for why
-that independence matters).
+Three arms are scored, and the third one is the one that actually ships:
+
+  rules     RuleDetector, computed live for every labeled row by calling it
+            straight over the post text pulled from --sample, since no
+            rule-arm predictions are stored on disk anywhere.
+  llm       read from --prelabels rather than computed live, since
+            prelabel.py already produced it independently of the rule
+            detector (see that script's own docstring for why that
+            independence matters).
+  combined  CombinedDetector, the detector the agent runs. It is
+            reconstructed here from the other two arms rather than executed,
+            so this script still makes no network calls. The cascade is
+            positive exactly where the rule arm produced a candidate AND the
+            LLM confirmed it, so those two stored signals are all it needs.
+            Reconstructing it also makes the structural point visible: the
+            cascade can only ever remove a rule positive, never add one, so
+            its recall is capped at the rule arm's by construction.
+
+Two provenance facts are printed with the numbers, because a metric without
+them is misleading:
+
+  * the model that produced the scored LLM predictions, read from the
+    `model` field of --prelabels. That is not necessarily the model the
+    agent runs at detection time, which is configured separately in
+    agent.py.
+  * whether an arm's predictions agree with the ground truth labels on
+    every single labeled row. Total agreement is not a good score, it is a
+    sign the labels derive from those predictions, in which case the metric
+    is x == x and no bootstrap resample can produce an error.
 
 Only rows where in_weighted_metrics is true (strata "candidate" and
 "random") feed the headline weighted precision/recall/F1. Stratum
@@ -57,12 +80,18 @@ _DEFAULT_LEXICON_PATH = _REPO_ROOT / "data" / "lexicon" / "tickers.csv"
 BOOTSTRAP_RESAMPLES = 2000
 BOOTSTRAP_SEED = 42
 TEXT_TRUNCATE = 100
-ARMS = ("rules", "llm")
+ARMS = ("rules", "llm", "combined")
+
+# The confirm_threshold CombinedDetector defaults to. Every rule confidence is
+# a positive float, so 0.0 means "consult the LLM whenever the rules produced
+# any mention at all", which is what makes a candidate here just "the rule arm
+# found something".
+COMBINED_CONFIRM_THRESHOLD = 0.0
 
 
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(
-        description="Evaluate the rule and LLM detector arms against human labels."
+        description="Evaluate the rule, LLM and combined detector arms against human labels."
     )
     parser.add_argument("--labeled", default="data/eval/labeled.jsonl", help="human labels, JSONL")
     parser.add_argument(
@@ -121,6 +150,34 @@ def _as_ticker_set(values) -> set[str]:
     return {str(v).strip().upper() for v in values if str(v).strip()}
 
 
+def _combined_arm(
+    rules_candidate: bool,
+    rules_positive: bool,
+    rules_tickers: set[str],
+    llm_positive: bool | None,
+    llm_tickers: set[str] | None,
+) -> tuple[bool | None, set[str] | None]:
+    """Reconstruct CombinedDetector's verdict without calling the LLM.
+
+    The cascade has exactly two branches. With no rule candidate the LLM is
+    never called and the rule verdict stands, which is negative, since a rule
+    positive requires a mention and a mention is a candidate. With a
+    candidate the LLM decides. So the cascade is positive only where the rule
+    arm produced a candidate and the LLM confirmed it, and that is what makes
+    it scoreable from stored predictions alone.
+
+    A missing prelabel leaves the verdict unknown (None) rather than guessed,
+    but only on rows where the cascade would actually have consulted the LLM.
+    """
+    if not rules_candidate:
+        return rules_positive, set(rules_tickers)
+    if llm_positive is None:
+        return None, None
+    # Ticker sets are unioned, matching the real detector, so a ticker the
+    # rules found but the LLM omitted is still reported.
+    return llm_positive, set(rules_tickers) | set(llm_tickers or set())
+
+
 def build_joined_rows(
     labeled_rows: list[dict],
     sample_by_id: dict[str, dict],
@@ -128,7 +185,8 @@ def build_joined_rows(
     rules: RuleDetector,
 ) -> tuple[list[dict], list[str]]:
     """Join labeled rows against the sample (for text/stratum/weight) and
-    the prelabels (for the LLM arm). Runs the rule arm live.
+    the prelabels (for the LLM arm). Runs the rule arm live and reconstructs
+    the combined arm from the two.
 
     Returns (joined_rows, labeled_ids_missing_from_sample). A labeled post_id
     that is not in eval_sample.jsonl cannot be scored (no text, no stratum,
@@ -162,6 +220,14 @@ def build_joined_rows(
         if not isinstance(blind, bool):
             blind = None
 
+        rules_tickers = {m.ticker for m in detection.mentions}
+        rules_candidate = any(
+            m.confidence >= COMBINED_CONFIRM_THRESHOLD for m in detection.mentions
+        )
+        combined_positive, combined_tickers = _combined_arm(
+            rules_candidate, detection.is_stock_related, rules_tickers, llm_positive, llm_tickers
+        )
+
         joined.append(
             {
                 "post_id": post_id,
@@ -173,9 +239,12 @@ def build_joined_rows(
                 "human_positive": bool(row.get("is_stock_related")),
                 "human_tickers": _as_ticker_set(row.get("tickers")),
                 "rules_positive": detection.is_stock_related,
-                "rules_tickers": {m.ticker for m in detection.mentions},
+                "rules_tickers": rules_tickers,
+                "rules_candidate": rules_candidate,
                 "llm_positive": llm_positive,
                 "llm_tickers": llm_tickers,
+                "combined_positive": combined_positive,
+                "combined_tickers": combined_tickers,
             }
         )
 
@@ -335,6 +404,41 @@ def blind_subset_report(headline_rows: list[dict]) -> dict:
     }
 
 
+def agreement_report(all_rows: list[dict], arm: str) -> dict:
+    """How often an arm's prediction equals the ground truth label.
+
+    This is not a quality metric. It is a provenance check. If an arm agrees
+    with the labels on every single row, the most likely explanation is not
+    that the arm is perfect, it is that the labels were derived from that
+    arm's own output. In that case precision and recall are computing x == x,
+    and the bootstrap CI collapsing to exactly [1.000, 1.000] is the tell,
+    since no resample of a set with zero errors can contain one.
+    """
+    pred_key = f"{arm}_positive"
+    scored = [r for r in all_rows if r.get(pred_key) is not None]
+    n_agree = sum(1 for r in scored if r[pred_key] == r["human_positive"])
+    return {
+        "n_scored": len(scored),
+        "n_agree": n_agree,
+        "rate": (n_agree / len(scored)) if scored else None,
+        "total": bool(scored) and n_agree == len(scored),
+    }
+
+
+def prelabel_models(prelabel_rows: list[dict]) -> list[str]:
+    """Distinct model ids that produced the prelabels, in first-seen order.
+
+    Empty when the prelabel rows carry no `model` field, which is reported as
+    unknown rather than filled in with a guess.
+    """
+    seen: list[str] = []
+    for row in prelabel_rows:
+        model = row.get("model")
+        if model and str(model) not in seen:
+            seen.append(str(model))
+    return seen
+
+
 def _truncate(text: str) -> str:
     text = text.replace("\n", " ")
     if len(text) <= TEXT_TRUNCATE:
@@ -382,7 +486,9 @@ def evaluate(
         "labeled_exists": labeled_path.exists(),
         "labeled_count": len(labeled_rows),
         "sample_count": len(sample_rows),
+        "prelabels_path": str(prelabels_path),
         "prelabels_count": len(prelabel_rows),
+        "prelabel_models": prelabel_models(prelabel_rows),
     }
 
     if not sample_rows:
@@ -411,6 +517,7 @@ def evaluate(
     result["suppression"] = {arm: suppression_report(joined, arm) for arm in ARMS}
     result["blind"] = blind_subset_report(headline_rows)
     result["errors"] = {arm: error_analysis(joined, arm) for arm in ARMS}
+    result["agreement"] = {arm: agreement_report(joined, arm) for arm in ARMS}
 
     result["report_text"] = _format_report(result)
     return result
@@ -433,7 +540,36 @@ def _fmt_ci(ci) -> str:
     return f"[{_fmt(ci[0])}, {_fmt(ci[1])}]"
 
 
-def _format_arm_block(arm: str, metrics: dict) -> list[str]:
+# Standing facts about an arm that hold no matter what the numbers come out
+# to, printed next to them so the numbers are never read without them.
+_ARM_NOTES = {
+    "combined": (
+        "note: this is the arm the agent actually ships. It fires only where the rule arm",
+        "produced a candidate and the LLM then confirmed it, so the cascade can only remove",
+        "a rule positive, never recover a rule false negative. Its recall is therefore",
+        "capped at the rule arm's by construction, and its precision inherits whatever the",
+        "LLM arm's predictions carry, including whatever the circularity check below finds.",
+    ),
+}
+
+
+def _format_circularity_warning(arm: str, agreement: dict, indent: str = "  ") -> list[str]:
+    """The warning printed whenever an arm never once disagrees with the labels."""
+    if not agreement or not agreement.get("total"):
+        return []
+    n = agreement["n_scored"]
+    return [
+        f"{indent}WARNING: this arm's predictions match the ground truth labels on "
+        f"{agreement['n_agree']}/{n} labeled rows, without a single disagreement.",
+        f"{indent}That is not a measurement of the arm. The labels derive from these very",
+        f"{indent}predictions, so precision and recall here are computing x == x and can only",
+        f"{indent}come out perfect. A bootstrap CI of exactly [1.000, 1.000] is the same fact",
+        f"{indent}restated: no resample of a set containing zero errors can produce one.",
+        f"{indent}Treat these numbers as a consistency check on the label file, not as a score.",
+    ]
+
+
+def _format_arm_block(arm: str, metrics: dict, agreement: dict | None = None) -> list[str]:
     lines = [f"### {arm} arm"]
     weighted = metrics["weighted"]
     unweighted = metrics["unweighted"]
@@ -458,6 +594,9 @@ def _format_arm_block(arm: str, metrics: dict) -> list[str]:
             f"  ({metrics['n_skipped_no_prediction']} headline rows skipped for this arm: "
             "no prediction available, e.g. missing from prelabels.jsonl)"
         )
+    for note in _ARM_NOTES.get(arm, ()):
+        lines.append(f"  {note}")
+    lines.extend(_format_circularity_warning(arm, agreement or {}))
     return lines
 
 
@@ -517,6 +656,18 @@ def _format_report(result: dict) -> str:
     lines.append(f"labeled rows found: {result['labeled_count']}")
     lines.append(f"eval sample rows: {result['sample_count']}")
 
+    models = result.get("prelabel_models") or []
+    model_str = ", ".join(models) if models else "unknown (no 'model' field on those rows)"
+    lines.append(
+        f"LLM prelabels: {result['prelabels_count']} rows from {result.get('prelabels_path')}"
+    )
+    lines.append(f"model that produced the scored LLM predictions: {model_str}")
+    lines.append(
+        "That is the model the llm and combined arms are scored on here. It is not "
+        "necessarily the model the agent runs at detection time, which agent.py "
+        "configures separately."
+    )
+
     if "fatal" in result:
         lines.append("")
         lines.append(f"Cannot evaluate: {result['fatal']}")
@@ -546,11 +697,30 @@ def _format_report(result: dict) -> str:
             "Suppression and error analysis below still use whatever hard_negative rows are labeled."
         )
 
+    agreement = result.get("agreement", {})
+
     if result["headline_n"] > 0:
         lines.append("")
         lines.append("## Headline metrics (candidate + random strata only, hard_negative excluded)")
         for arm in ARMS:
-            lines.extend(_format_arm_block(arm, result["headline"][arm]))
+            lines.extend(_format_arm_block(arm, result["headline"][arm], agreement.get(arm)))
+
+    lines.append("")
+    lines.append("## Circularity check (arm predictions vs the ground truth labels)")
+    lines.append(
+        "  Agreement over every labeled row, not just the headline strata. High agreement "
+        "is expected. Total agreement means the labels came from the arm."
+    )
+    for arm in ARMS:
+        report = agreement.get(arm)
+        if not report or report["n_scored"] == 0:
+            lines.append(f"  {arm}: no scored rows")
+            continue
+        lines.append(
+            f"  {arm}: {report['n_agree']}/{report['n_scored']} rows agree "
+            f"({_fmt(report['rate'])})"
+        )
+        lines.extend(_format_circularity_warning(arm, report, indent="    "))
 
     lines.append("")
     lines.append("## Suppression report (hard_negative trap stratum)")
@@ -569,6 +739,12 @@ def _format_report(result: dict) -> str:
         lines.append(f"  blind=true  (n={bt['n']}): precision={_fmt(bt['precision'])} recall={_fmt(bt['recall'])} f1={_fmt(bt['f1'])}")
         lines.append(f"  blind=false (n={bf['n']}): precision={_fmt(bf['precision'])} recall={_fmt(bf['recall'])} f1={_fmt(bf['f1'])}")
         lines.append(f"  gap (blind=false f1 minus blind=true f1): {_fmt(blind['gap_f1'])}")
+        if agreement.get("llm", {}).get("total"):
+            lines.append(
+                "  This split cannot show anything while the LLM arm matches the labels on "
+                "every row. Both halves are perfect for the same reason, so the gap of zero "
+                "measures nothing."
+            )
 
     lines.append("")
     lines.append("## Error analysis")

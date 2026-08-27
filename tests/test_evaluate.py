@@ -15,6 +15,11 @@ import evaluate
 # on what the lexicon currently contains.
 _LEXICON_PATH = Path(__file__).resolve().parent.parent / "data" / "lexicon" / "tickers.csv"
 
+# Stand-in for the model id that prelabel.py stamps on every row it writes.
+# The report has to name it, since the arm being scored is only as meaningful
+# as the model that produced the predictions.
+_PRELABEL_MODEL = "test/prelabel-model-a"
+
 
 def _write_jsonl(path: Path, rows: list[dict]) -> None:
     with path.open("w", encoding="utf-8") as f:
@@ -61,12 +66,15 @@ def _build_handcrafted_set(tmp_path: Path):
     # hand, while the rule arm (computed live, not from this file) gets p2
     # wrong (fires on the AAPL cashtag though the human said not related)
     # and misses p4 (no cashtag or alias appears in that sentence at all).
+    # That perfection is also what the circularity check must flag: it is the
+    # same shape as the real eval set, where labeled.jsonl was derived from
+    # these predictions and the arm ends up graded against its own output.
     prelabel_rows = [
-        {"post_id": "p1", "is_stock_related": True, "tickers": ["TSLA"], "companies": ["Tesla"]},
-        {"post_id": "p2", "is_stock_related": False, "tickers": [], "companies": []},
-        {"post_id": "p3", "is_stock_related": False, "tickers": [], "companies": []},
-        {"post_id": "p4", "is_stock_related": True, "tickers": ["TSLA"], "companies": ["Tesla"]},
-        {"post_id": "p5", "is_stock_related": False, "tickers": [], "companies": []},
+        {"post_id": "p1", "is_stock_related": True, "tickers": ["TSLA"], "companies": ["Tesla"], "model": _PRELABEL_MODEL},
+        {"post_id": "p2", "is_stock_related": False, "tickers": [], "companies": [], "model": _PRELABEL_MODEL},
+        {"post_id": "p3", "is_stock_related": False, "tickers": [], "companies": [], "model": _PRELABEL_MODEL},
+        {"post_id": "p4", "is_stock_related": True, "tickers": ["TSLA"], "companies": ["Tesla"], "model": _PRELABEL_MODEL},
+        {"post_id": "p5", "is_stock_related": False, "tickers": [], "companies": [], "model": _PRELABEL_MODEL},
     ]
 
     sample_path = tmp_path / "eval_sample.jsonl"
@@ -205,3 +213,159 @@ def test_evaluate_never_crashes_and_exits_zero_when_sample_missing(tmp_path, cap
     assert exit_code == 0
     out = capsys.readouterr().out
     assert "Cannot evaluate" in out
+
+
+def _rewrite_prelabels(prelabels_path: Path, changes: dict[str, dict | None]) -> None:
+    """Rewrite prelabels.jsonl, patching or dropping rows by post_id.
+
+    A value of None drops that row entirely, which is how "the LLM has no
+    prediction for this post" is expressed on disk.
+    """
+    rows = []
+    for line in prelabels_path.read_text(encoding="utf-8").splitlines():
+        if not line.strip():
+            continue
+        row = json.loads(line)
+        if row["post_id"] in changes:
+            patch = changes[row["post_id"]]
+            if patch is None:
+                continue
+            row = {**row, **patch}
+        rows.append(row)
+    _write_jsonl(prelabels_path, rows)
+
+
+def test_combined_arm_is_scored_and_is_the_cascade_that_ships(tmp_path):
+    sample_path, labeled_path, prelabels_path = _build_handcrafted_set(tmp_path)
+
+    result = evaluate.evaluate(labeled_path, sample_path, prelabels_path, _LEXICON_PATH)
+
+    assert "combined" in evaluate.ARMS
+    assert set(result["headline"]) == {"rules", "llm", "combined"}
+
+    # p1: rule candidate ($TSLA) and the LLM confirms   -> positive, human positive, TP w=1
+    # p2: rule candidate ($AAPL) and the LLM refuses    -> negative, human negative, TN w=1
+    # p3: no rule candidate, the LLM is never consulted -> negative, human negative, TN w=3
+    # p4: no rule candidate, so the LLM's positive is never asked for and never
+    #     applied           -> negative, human positive, FN w=3
+    combined = result["headline"]["combined"]["weighted"]
+    assert combined["tp"] == 1.0
+    assert combined["fp"] == 0.0
+    assert combined["fn"] == 3.0
+    assert combined["tn"] == 4.0
+    assert combined["precision"] == 1.0
+    assert combined["recall"] == 0.25
+
+
+def test_combined_recall_cannot_exceed_the_rule_arm_recall(tmp_path):
+    sample_path, labeled_path, prelabels_path = _build_handcrafted_set(tmp_path)
+
+    result = evaluate.evaluate(labeled_path, sample_path, prelabels_path, _LEXICON_PATH)
+
+    rules = result["headline"]["rules"]["weighted"]
+    llm = result["headline"]["llm"]["weighted"]
+    combined = result["headline"]["combined"]["weighted"]
+
+    # The cascade gates the LLM on a rule candidate, so it can only ever turn a
+    # rule positive off, never turn a rule negative on. p4 is the whole point:
+    # the LLM gets it right on its own and the shipped detector still misses it.
+    assert llm["recall"] == 1.0
+    assert combined["recall"] == rules["recall"]
+    assert combined["recall"] < llm["recall"]
+
+
+def test_combined_arm_needs_no_llm_prediction_where_the_cascade_would_not_call_one(tmp_path):
+    sample_path, labeled_path, prelabels_path = _build_handcrafted_set(tmp_path)
+    # p1 has a rule candidate, so the cascade would call the LLM and cannot be
+    # scored without its answer. p4 has none, so the cascade short circuits on
+    # the rule verdict and stays scoreable.
+    _rewrite_prelabels(prelabels_path, {"p1": None, "p4": None})
+
+    result = evaluate.evaluate(labeled_path, sample_path, prelabels_path, _LEXICON_PATH)
+
+    assert result["headline"]["llm"]["n_skipped_no_prediction"] == 2
+    assert result["headline"]["combined"]["n_skipped_no_prediction"] == 1
+    combined = result["headline"]["combined"]["weighted"]
+    assert combined["n"] == 3
+    # p4 still counts as the false negative it is, without a guess standing in
+    # for the missing prelabel.
+    assert combined["fn"] == 3.0
+
+
+def test_total_agreement_with_the_labels_is_flagged_not_reported_as_a_score(tmp_path, capsys):
+    sample_path, labeled_path, prelabels_path = _build_handcrafted_set(tmp_path)
+    report_path = tmp_path / "metrics.md"
+
+    exit_code = evaluate.main(
+        [
+            "--labeled",
+            str(labeled_path),
+            "--sample",
+            str(sample_path),
+            "--prelabels",
+            str(prelabels_path),
+            "--lexicon",
+            str(_LEXICON_PATH),
+            "--report",
+            str(report_path),
+        ]
+    )
+
+    assert exit_code == 0
+    result = evaluate.evaluate(labeled_path, sample_path, prelabels_path, _LEXICON_PATH)
+    assert result["agreement"]["llm"] == {
+        "n_scored": 5,
+        "n_agree": 5,
+        "rate": 1.0,
+        "total": True,
+    }
+
+    console = capsys.readouterr().out
+    written = report_path.read_text(encoding="utf-8")
+    # The warning has to reach both places, since metrics.md is what gets read
+    # later and the console is what gets read now.
+    for text in (console, written):
+        assert "WARNING" in text
+        assert "5/5 labeled rows" in text
+        assert "not a measurement" in text
+        assert "x == x" in text
+
+
+def test_partial_agreement_is_reported_without_a_circularity_warning(tmp_path):
+    sample_path, labeled_path, prelabels_path = _build_handcrafted_set(tmp_path)
+    # One disagreement is enough: the arm is now capable of being wrong against
+    # these labels, which is exactly what the check is looking for.
+    _rewrite_prelabels(prelabels_path, {"p3": {"is_stock_related": True}})
+
+    result = evaluate.evaluate(labeled_path, sample_path, prelabels_path, _LEXICON_PATH)
+
+    llm_agreement = result["agreement"]["llm"]
+    assert llm_agreement["n_agree"] == 4
+    assert llm_agreement["n_scored"] == 5
+    assert llm_agreement["total"] is False
+    assert all(not result["agreement"][arm]["total"] for arm in evaluate.ARMS)
+    assert "WARNING" not in result["report_text"]
+
+
+def test_report_names_the_model_that_produced_the_scored_predictions(tmp_path):
+    sample_path, labeled_path, prelabels_path = _build_handcrafted_set(tmp_path)
+
+    result = evaluate.evaluate(labeled_path, sample_path, prelabels_path, _LEXICON_PATH)
+
+    assert result["prelabel_models"] == [_PRELABEL_MODEL]
+    assert _PRELABEL_MODEL in result["report_text"]
+    # And it says out loud that this is not necessarily what the agent runs.
+    assert "not necessarily the model the agent runs" in result["report_text"]
+
+
+def test_unstamped_prelabels_report_the_model_as_unknown_rather_than_guessing(tmp_path):
+    sample_path, labeled_path, prelabels_path = _build_handcrafted_set(tmp_path)
+    _rewrite_prelabels(
+        prelabels_path,
+        {post_id: {"model": None} for post_id in ("p1", "p2", "p3", "p4", "p5")},
+    )
+
+    result = evaluate.evaluate(labeled_path, sample_path, prelabels_path, _LEXICON_PATH)
+
+    assert result["prelabel_models"] == []
+    assert "model that produced the scored LLM predictions: unknown" in result["report_text"]

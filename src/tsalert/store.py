@@ -34,6 +34,7 @@ CREATE TABLE IF NOT EXISTS alerts (
     channel TEXT,
     status TEXT,
     attempts INTEGER,
+    cycles INTEGER DEFAULT 0,
     first_attempt_at TEXT,
     delivered_at TEXT,
     last_error TEXT,
@@ -82,6 +83,7 @@ class Store:
         self._conn.execute("PRAGMA journal_mode=WAL")
         self._conn.executescript(SCHEMA_SQL)
         self._migrate_add_quoted_text()
+        self._migrate_add_alert_cycles()
         self._conn.commit()
 
     def _migrate_add_quoted_text(self) -> None:
@@ -89,6 +91,14 @@ class Store:
         columns = {row[1] for row in self._conn.execute("PRAGMA table_info(posts)")}
         if "quoted_text" not in columns:
             self._conn.execute("ALTER TABLE posts ADD COLUMN quoted_text TEXT DEFAULT ''")
+
+    def _migrate_add_alert_cycles(self) -> None:
+        # Databases created before the attempts/cycles split existed are still
+        # around locally. Existing rows default to 0 cycles, which is correct:
+        # they have not yet been through a retry_failed pass under the new scheme.
+        columns = {row[1] for row in self._conn.execute("PRAGMA table_info(alerts)")}
+        if "cycles" not in columns:
+            self._conn.execute("ALTER TABLE alerts ADD COLUMN cycles INTEGER DEFAULT 0")
 
     def upsert_post(self, post: Post) -> bool:
         cur = self._conn.execute(
@@ -145,13 +155,24 @@ class Store:
         status: str,
         error: str | None = None,
         attempts_made: int = 1,
+        is_retry: bool = False,
     ) -> None:
+        """Record the outcome of a send.
+
+        attempts counts real sends and accumulates across every call, dispatch()
+        and retry_failed() alike. cycles is a separate lifetime counter that only
+        moves when is_retry is True, i.e. when this result comes from a
+        retry_failed pass rather than the original dispatch(). That split is what
+        lets retryable_alerts bound lifetime retries independently of the
+        per-call send budget (max_attempts).
+        """
         now = datetime.now(timezone.utc).isoformat()
         delivered_at = now if status == "delivered" else None
+        cycle_increment = 1 if is_retry else 0
         self._conn.execute(
-            "UPDATE alerts SET status=?, attempts=attempts+?, "
+            "UPDATE alerts SET status=?, attempts=attempts+?, cycles=cycles+?, "
             "delivered_at=COALESCE(?, delivered_at), last_error=? WHERE post_id=? AND channel=?",
-            (status, attempts_made, delivered_at, error, post_id, channel),
+            (status, attempts_made, cycle_increment, delivered_at, error, post_id, channel),
         )
         self._conn.commit()
 
@@ -179,20 +200,30 @@ class Store:
             self._conn.execute(f"UPDATE latency SET {columns} WHERE post_id=?", values)
         self._conn.commit()
 
-    def retryable_alerts(self, max_attempts: int) -> list[tuple[str, str]]:
+    def retryable_alerts(self, max_cycles: int) -> list[tuple[str, str]]:
         """Alerts worth retrying, as (post_id, channel).
 
-        Covers both 'failed' (every attempt in a dispatch() call was used up)
-        and 'pending' (claim_alert inserted the row but the process crashed
+        Covers both 'failed' (every attempt in a dispatch() call was used up
+        for a transient reason, so the channel may simply have been down) and
+        'pending' (claim_alert inserted the row but the process crashed
         before record_alert_result ever ran). A 'pending' row is not a sign
         delivery is still in flight, since nothing else in this codebase can
         be mid-send concurrently: it is a stuck claim, and stuck is exactly
         what retrying is for.
+
+        Status alone excludes 'permanent_failure': a 4xx, bad token or bad
+        chat id cannot succeed by retrying, so those rows are never selected
+        here, however many cycles pass. cycles is the lifetime retry budget,
+        separate from max_attempts (the per-call send budget inside a single
+        dispatch or retry_failed attempt): it only grows once per
+        retry_failed pass, so a channel outage that burns its whole
+        per-call attempts budget still gets picked up again here on the next
+        pass, until max_cycles passes have been spent on it.
         """
         rows = self._conn.execute(
             "SELECT post_id, channel FROM alerts "
-            "WHERE status IN ('failed', 'pending') AND attempts < ?",
-            (max_attempts,),
+            "WHERE status IN ('failed', 'pending') AND cycles < ?",
+            (max_cycles,),
         ).fetchall()
         return [(row["post_id"], row["channel"]) for row in rows]
 
@@ -219,6 +250,23 @@ class Store:
             (channel, limit),
         ).fetchall()
         return [row["id"] for row in rows]
+
+    def undetected_posts(self, limit: int = 50) -> list[Post]:
+        """Posts that were ingested but never made it through the detector.
+
+        detected_at IS NULL is what a crash between upsert_post and
+        save_detection leaves behind: the posts row exists, so upsert_post's
+        is_new gate will never return True for this id again, and nothing
+        else in the codebase revisits a row once it exists. This is the same
+        gap undelivered_stock_posts closes for detected-but-undelivered
+        posts, one stage earlier in the pipeline. Bounded like that query so
+        a large backlog cannot stall a poll cycle.
+        """
+        rows = self._conn.execute(
+            "SELECT * FROM posts WHERE detected_at IS NULL ORDER BY created_at ASC LIMIT ?",
+            (limit,),
+        ).fetchall()
+        return [self._row_to_post(row) for row in rows]
 
     def get_post_with_detection(self, post_id: str) -> tuple[Post, Detection] | None:
         """Rebuild a post and its stored detection, for retrying a failed delivery."""

@@ -6,14 +6,16 @@ from datetime import datetime, timezone
 from typing import Any, Callable
 
 from tsalert.alerts.dispatcher import AlertDispatcher
+from tsalert.models import Post
 from tsalert.monitor import HealthMonitor
-from tsalert.reliability import AdaptiveInterval
+from tsalert.reliability import AdaptiveInterval, with_retries
 from tsalert.sources.base import PermanentSourceError, TransientSourceError, id_sort_key
 from tsalert.store import Store
 
 logger = logging.getLogger(__name__)
 
 _LAST_SEEN_KEY = "last_seen_post_id"
+_UNDETECTED_BACKLOG_LIMIT = 50
 
 
 class AgentRunner:
@@ -55,11 +57,24 @@ class AgentRunner:
         # claimed for delivery at all, which used to mean they were lost
         # forever the moment upsert_post's is_new gate turned False.
         self.dispatcher.recover_undelivered()
+        # A crash between upsert_post and save_detection leaves detected_at
+        # NULL forever, since upsert_post's is_new gate then hides the post
+        # from every future poll. Runs before fetching new posts so a
+        # backlog from a prior crash does not get pushed further behind by
+        # this poll's own new posts.
+        for post in self.store.undetected_posts(limit=_UNDETECTED_BACKLOG_LIMIT):
+            self._detect_and_dispatch(post)
 
         since_id = self.store.get_state(_LAST_SEEN_KEY)
 
         try:
-            posts = self.source.fetch_latest(since_id=since_id)
+            # A single transient blip (one dropped connection, one 5xx) is
+            # worth a few seconds of retry here rather than costing a whole
+            # poll interval, which can be minutes under AdaptiveInterval.
+            posts = with_retries(
+                lambda: self.source.fetch_latest(since_id=since_id),
+                sleep=self.sleep,
+            )
         except TransientSourceError as exc:
             logger.warning("transient source error, will retry next poll: %s", exc)
             self.monitor.record_poll(ok=False, new_posts=0)
@@ -81,23 +96,8 @@ class AgentRunner:
                 if not is_new:
                     continue
 
-                detection = self.detector.detect(post.detection_text, post.id)
-                self.store.save_detection(detection)
-                # Stamp latency on every post that arrives. Only stamping the ones that
-                # alert. Stock mentions are roughly two percent of posts, so waiting
-                # for a delivered alert to sample latency would take days. The
-                # publish to fetch stage is the one bounded by the poll interval and
-                # it dominates the total, so it is the number worth measuring.
-                self.store.record_latency(
-                    post.id,
-                    published_at=post.created_at.isoformat(),
-                    fetched_at=post.fetched_at.isoformat(),
-                    detected_at=datetime.now(timezone.utc).isoformat(),
-                )
+                self._detect_and_dispatch(post)
                 new_count += 1
-                if detection.is_stock_related:
-                    self.dispatcher.dispatch(post, detection)
-                    self.alerts_sent += 1
         except (ValueError, TypeError) as exc:
             # An unexpected id shape or malformed post must never kill the
             # loop. id_sort_key already makes comparisons safe, but this is
@@ -116,6 +116,30 @@ class AgentRunner:
             self.dispatcher.dispatch_ops(alarm.name, alarm.detail)
 
         return new_count
+
+    def _detect_and_dispatch(self, post: Post) -> None:
+        """Run one post through the detector, persist it, dispatch if it hits.
+
+        Shared by the new-post loop and the undetected-backlog recovery pass
+        above, so a post recovered after a crash goes through exactly the
+        same detect/save/dispatch steps a freshly fetched one does.
+        """
+        detection = self.detector.detect(post.detection_text, post.id)
+        self.store.save_detection(detection)
+        # Stamp latency on every post that arrives. Only stamping the ones that
+        # alert. Stock mentions are roughly two percent of posts, so waiting
+        # for a delivered alert to sample latency would take days. The
+        # publish to fetch stage is the one bounded by the poll interval and
+        # it dominates the total, so it is the number worth measuring.
+        self.store.record_latency(
+            post.id,
+            published_at=post.created_at.isoformat(),
+            fetched_at=post.fetched_at.isoformat(),
+            detected_at=datetime.now(timezone.utc).isoformat(),
+        )
+        if detection.is_stock_related:
+            self.dispatcher.dispatch(post, detection)
+            self.alerts_sent += 1
 
     def run(self, max_iterations: int | None = None) -> None:
         iterations = 0
