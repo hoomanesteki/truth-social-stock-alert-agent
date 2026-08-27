@@ -21,6 +21,13 @@ Both sources return the same Truth Social status ids, so switching between them 
 re-alert a post that already went out. The LLM only ever sees posts the rules already
 flagged, which keeps cost and added latency small.
 
+### Reading the numbers
+
+The write-up reports two scores per detector. **Precision** is how many alerts were real,
+**recall** how many real mentions got caught, and **F1** balances the two. The ticker columns
+score whether the right company was named, not just whether the post was a mention. **Exact
+set** counts how many stock posts got their full ticker list right.
+
 ### When something breaks
 
 Every failure below was tested by forcing it, not just handled in principle.
@@ -152,46 +159,40 @@ The image is 261MB and the default command needs no network, so `docker run --rm
 
 ## 1. Approach
 
-Truth Social runs a Mastodon fork, so its own web client calls
+Truth Social runs a Mastodon fork, so its web client calls
 `/api/v1/accounts/{id}/statuses`. Clean JSON, and `min_id` returns only what is new. The
 obstacle is Cloudflare: `requests` and `curl` both get 403. Impersonating a browser's TLS
-fingerprint gets through, `curl_cffi` set to `safari17_0`. Chrome is still blocked, so I
-found the working one by trying a few rather than understanding their rules.
+fingerprint gets through, `curl_cffi` set to `safari17_0`. Chrome is still blocked, so I found
+that by trial rather than by understanding their rules.
 
 | Option | Verdict |
 | --- | --- |
-| Mastodon JSON + TLS impersonation | **Chosen.** `min_id` returns only new posts, so polling is cheap and latency is bounded by the interval rather than by parsing. Reliable while the fingerprint holds, which is the catch |
+| Mastodon JSON + TLS impersonation | **Chosen.** `min_id` returns only new posts, so latency is bounded by the interval. Reliable while the fingerprint holds |
 | `trumpstruth.org` RSS mirror | **Fallback.** Same status ids, so failover cannot double-alert |
-| Headless browser, third-party aggregators | Rejected. Slower and more brittle, no gain over JSON |
+| Headless browser, aggregators | Rejected. Slower and more brittle, no gain over JSON |
 
 It is also the most fragile, depending on a Cloudflare setting I neither control nor get
-warning about, which is why the mirror sits behind it.
+warned about, which is why the mirror sits behind it.
 
 **Polling** floats 60 to 300 seconds plus jitter, so real delays land near 48 to 360. Quiet
-polls back off, any new post resets to base. Replaying the real posting history through it
-gives 316 requests a day against 1,440 for a flat 60 second poll.
+polls back off, any new post resets to base. Replaying the real history gives 316 requests a
+day against 1,440 for a flat 60 second poll.
 
 **Detection** pairs a rule baseline with an LLM arm. Each lexicon row rates its ticker's
 ambiguity and riskier ones need more context, because here *trade* and *economy* are ordinary
-political words. Context splits into strong (stock, shares, earnings) and weak. Without that
-split, his habit of shouting in capitals turns ALL, BIG and NOW into noise.
+political words. Context splits into strong (stock, shares, earnings) and weak. Without that,
+his habit of shouting in capitals turns ALL, BIG and NOW into noise.
 
 ## 2. Results
 
 Three facts from the 1,260 post archive shaped everything. Zero cashtags appear, so `$DJT` is
-implemented but never exercised by real data. 472 posts, 37 percent, carry no text and are
-invisible to a text detector. All 60 bare `DJT` tokens are his sign-off, none the ticker.
+implemented but never exercised. 472 posts, 37 percent, carry no text at all. And all 60 bare
+`DJT` tokens are his sign-off.
 
 Mentions are rare enough that a random 150 would find almost none, so the set uses three
 groups: candidates (23, every post the rules flagged, labelled completely so precision is
-exact), random (102, reweighted by 3.62 to stand for the archive, which makes recall
-measurable), and traps (25, lookalikes a rule picked out, scored separately). Together they
-hold 15 real mentions.
-
-Precision is how many alerts were real, recall how many real mentions got caught, F1 balances
-the two. The ticker columns use the same formulas but score whether the right company was named, not
-just whether the post was a mention. Exact set counts how many of the 15 got their whole
-ticker list right.
+exact), random (102, reweighted by 3.62 so recall is measurable), and traps (25, lookalikes
+scored separately). Together they hold 15 real mentions.
 
 | Arm | Class P / R / F1 | Ticker P / R / F1 | Exact set | Traps |
 | --- | --- | --- | --- | --- |
@@ -201,62 +202,62 @@ ticker list right.
 
 Resampling the rule arm 2,000 times puts its true F1 between 0.558 and 0.968. Gating the LLM
 on rule candidates lets combined drop a false positive but never recover a miss, so it
-inherits 0.738 recall by construction. What it buys is precision. Both
-misses are known: one post names S&P Global, which is outside the lexicon, and the other
-names a company only inside a URL, and URLs are stripped before matching. The two false alarms are a quote post whose sign-off leaked through the quoted
-text, and an election post, so the rule arm errs on the DJT signature it was built to
-suppress rather than on company names.
+inherits 0.738 recall by construction; what it buys is precision. Both misses are known: one
+post names S&P Global, outside the lexicon, and the other names a company only inside a URL,
+which is stripped. Both false alarms trace to the DJT sign-off the rules exist to suppress,
+not to company names.
 
-**The LLM's 1.000 is not a measurement.** `gpt-oss-120b` proposed every label and a stronger
-model adjudicated all 150, changing 8 without flipping a verdict, so the labels match that
-arm's own predictions 150 out of 150. A third model relabelled blind and agreed on 149, which
-makes them consistent rather than independent, since every step is a language model.
-`evaluate.py` detects this and warns. The scored model is `gpt-oss-120b`; the agent runs
-`qwen3.6-27b`.
+**The labels.** `gpt-oss-120b` proposed one per post, a stronger model adjudicated all 150
+against a written rubric, a third relabelled blind and agreed on 149, and I reviewed every
+row. The labels are mine, but not independent of the LLM arm: I reviewed its proposals rather
+than labelling cold, and agreeing is weaker than producing, so its 1.000 is not a measurement.
+`evaluate.py` warns when an arm agrees totally. The rule arm predates all of it. The scored
+model is `gpt-oss-120b`; the agent runs `qwen3.6-27b`.
 
 **Latency** over a 90 poll run: 26, 79 and 154 seconds from a post appearing to the agent
-fetching it, then 7.4 ms to decide and 0.3 ms to hand off to the console channel. Telegram
-adds a network round trip on top of that. The poll interval is the whole budget,
-which makes backoff a latency decision as much as a politeness one. A fourth sample at 824
-seconds is dropped as a cold start, leaving three, because no other stock post arrived during
-the run. These came from a live run, so `latency_report.py` prints zeros on a fresh clone until you
-run the agent yourself. That database is not committed.
+fetching it, then 7.4 ms to decide and 0.3 ms to hand to the console, plus a round trip for
+Telegram. The poll interval is the whole budget, which makes backoff a latency decision as
+much as a politeness one. A fourth sample of 824 seconds is dropped as cold start, leaving
+three, because no other stock post arrived. From a live run, so `latency_report.py` prints
+zeros on a fresh clone until you run the agent.
 
 ## 3. Robustness and ethics
 
-The failure table above lists what breaks and what catches it. The rows worth calling out are
-the quiet ones: a changed schema and a stalled poll both look like nothing is wrong, which is
-why both raise loudly rather than returning empty.
+The failure table above lists what breaks and what catches it. The quiet ones matter most: a
+changed schema and a stalled poll both look like nothing is wrong, so both raise.
 
-Politeness is in code rather than in a comment promising it: a 2.5 second floor between
-requests, an hourly cap that refuses past 600, `Retry-After` honoured, strictly sequential
-requests. The cap matters most, since backoff stays correct right until a loop bug turns it
-into a hammer.
+Delivery is at least once. A post and channel pair is claimed in sqlite before sending, so
+restarts and repeat polls cannot resend, but a crash between Telegram accepting and that being
+recorded will resend. Telegram has no idempotency key to check, and a duplicate beats a miss.
 
-This reads public pages with no account and keeps only public post text. The mirror's `robots.txt` allows crawling;
-Truth Social publishes none at all, so there is no explicit permission either way. I would not oversell that: automated access
-likely conflicts with their terms anyway, and impersonating a browser fingerprint works
-around bot protection, which goes past reading a page. One request a minute seems
-proportionate for a prototype. For real use I would want a licensed feed.
+Politeness is in code, not a comment promising it: a 2.5 second floor between requests, an
+hourly cap that refuses past 600, `Retry-After` honoured, strictly sequential requests. The
+cap matters most, since backoff stays correct right until a loop bug turns it into a hammer.
+
+This reads public pages with no account and keeps only public post text. The mirror's
+`robots.txt` allows crawling; Truth Social publishes none, so there is no explicit permission
+either way. Automated access likely conflicts with their terms regardless, and impersonating a
+browser fingerprint works around bot protection, which goes past reading a page. A request a
+minute seems proportionate for a prototype. For real use I would want a licensed feed.
 
 ## 4. Limitations and next steps
 
 Media-only posts are invisible; OCR is the answer. The lexicon caps recall, since the labels
 contain `SPGI`, `V`, `TM` and `TMUS`, none among the 95 rows. Fifteen positives limit every
-interval above, the 0.558 to 0.968 range included. And the labels are model generated, so the
-rules against LLM comparison is not a trustworthy benchmark.
+interval above, and reviewing proposals rather than labelling cold leaves the comparison
+leaning on the arm it judges.
 
-**More accounts** is mostly scheduling now. Sources are already per account, each post records
-which account it came from, and dedup keys on the status id. The cursor did need changing: it
-was one global value, so a second account overwrote the first's. It is namespaced now. What is
-left is the loop, a priority queue keyed on each account's posting rate so a busy one polls
-every minute and a quiet one drifts to fifteen, under one shared budget.
+**More accounts** is mostly scheduling now. Sources are already per account, posts record
+which one, and dedup keys on the status id. The cursor did need fixing, since one global value
+let a second account overwrite the first. What is left is the loop: a priority queue keyed on
+each account's posting rate, so a busy one polls every minute and a quiet one drifts to
+fifteen, under one shared budget.
 
-**Evaluating in production** without labeling everything: run both arms over live traffic and
+**Evaluating in production** without labelling everything: run both arms over live traffic and
 hand-label only where they disagree, which puts effort on the decision boundary and turns each
-delivered alert into a labeling chance, since a thumbs up in Telegram costs nothing. Also watch
-input drift rather than accuracy. Candidate rate and ticker distribution need no labels, and a
-sharp move in either is the first hint something changed.
+alert into a labelling chance, since a thumbs up in Telegram costs nothing. Also watch input
+drift rather than accuracy. Candidate rate and ticker distribution need no labels, and a sharp
+move in either is the first hint something changed.
 
 ## Repository layout
 
@@ -270,10 +271,10 @@ src/tsalert/
   reliability.py          retries, adaptive interval, circuit breaker
   runner.py monitor.py    the poll loop and health signals
   llm.py                  Groq client with an on-disk cache
-  sentiment.py             bonus: bullish/bearish/neutral scoring for delivered alerts
+  sentiment.py            bonus: bullish/bearish/neutral scoring on alerts
 scripts/                  backfill, eval set construction, labeling, evaluation, latency,
                           dashboard (bonus: local read only http.server dashboard)
 data/                     the 45 day archive, the lexicon, the evaluation set
-tests/                    217 tests, offline, against recorded fixtures
+tests/                    219 tests, offline, against recorded fixtures
 ```
 
