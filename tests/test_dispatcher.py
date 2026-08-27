@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from dataclasses import replace
 from datetime import datetime, timezone
 
 import pytest
@@ -405,3 +406,29 @@ def test_one_failing_channel_does_not_stop_the_other(tmp_path):
         )
         assert rows["console"] == "delivered"
         assert rows["telegram"] != "delivered"
+
+
+def test_recovered_alerts_do_not_enter_the_latency_table(tmp_path):
+    """Recovery delivers, but must not time what it delivers.
+
+    A recovered post was ingested by an earlier run, so publish to fetch on
+    it measures how old the backlog is. A live run once reported a median
+    latency of several weeks because of this.
+    """
+    from datetime import timedelta
+
+    old = datetime.now(timezone.utc) - timedelta(days=29)
+    post = make_post()
+    post = replace(post, created_at=old, fetched_at=old)
+    detection = make_detection()
+    channel = FakeChannel("telegram")
+
+    with Store(tmp_path / "recover.db") as store:
+        store.upsert_post(post)
+        store.save_detection(detection)
+        dispatcher = AlertDispatcher([channel], store, sleep=lambda _s: None)
+        dispatcher.recover_undelivered()
+
+        assert len(channel.sent) == 1
+        rows = store._conn.execute("SELECT COUNT(*) FROM latency").fetchone()[0]
+    assert rows == 0

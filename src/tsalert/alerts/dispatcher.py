@@ -49,7 +49,8 @@ class AlertDispatcher:
         self.sleep = sleep
         self._rng = random.Random()
 
-    def dispatch(self, post: Post, detection: Detection) -> list[DeliveryResult]:
+    def dispatch(self, post: Post, detection: Detection,
+                 time_it: bool = True) -> list[DeliveryResult]:
         detected_at = datetime.now(timezone.utc)
         text = self._format(post, detection)
         results = []
@@ -62,7 +63,9 @@ class AlertDispatcher:
             # channel finds the row already there and skips silently.
             if not self.store.claim_alert(post.id, channel.name):
                 continue
-            results.append(self._send_and_record(post, channel, text, detected_at))
+            results.append(
+                self._send_and_record(post, channel, text, detected_at, time_it=time_it)
+            )
         return results
 
     def dispatch_ops(self, alarm_name: str, detail: str) -> list[DeliveryResult]:
@@ -117,7 +120,10 @@ class AlertDispatcher:
             post, detection = loaded
             text = self._format(post, detection)
             detected_at = datetime.now(timezone.utc)
-            results.append(self._send_and_record(post, channel, text, detected_at, is_retry=True))
+            results.append(
+                self._send_and_record(post, channel, text, detected_at,
+                                      is_retry=True, time_it=False)
+            )
         return results
 
     def recover_undelivered(self) -> list[DeliveryResult]:
@@ -141,7 +147,9 @@ class AlertDispatcher:
                 if loaded is None:
                     continue
                 post, detection = loaded
-                results.extend(self.dispatch(post, detection))
+                # Recovered posts were ingested by an earlier run, so timing
+                # them measures how old the backlog is, not how fast we are.
+                results.extend(self.dispatch(post, detection, time_it=False))
         return results
 
 
@@ -177,6 +185,7 @@ class AlertDispatcher:
         text: str,
         detected_at: datetime,
         is_retry: bool = False,
+        time_it: bool = True,
     ) -> DeliveryResult:
         ok, attempts, error, permanent = self._send_with_retries(channel, text)
         if ok:
@@ -197,6 +206,7 @@ class AlertDispatcher:
         delivered_at = None
         if ok:
             delivered_at = datetime.now(timezone.utc)
+        if ok and time_it:
             self.store.record_latency(
                 post.id,
                 published_at=post.created_at.isoformat(),
