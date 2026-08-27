@@ -38,6 +38,9 @@ class AgentRunner:
     ) -> None:
         self.source = source
         self.alerts_sent = 0
+        # Set when a source asks us to back off for longer than the retry
+        # budget covers. The run loop uses it instead of the usual interval.
+        self.next_delay_override: float | None = None
         self.detector = detector
         self.dispatcher = dispatcher
         self.store = store
@@ -76,7 +79,17 @@ class AgentRunner:
                 sleep=self.sleep,
             )
         except TransientSourceError as exc:
-            logger.warning("transient source error, will retry next poll: %s", exc)
+            retry_after = getattr(exc, "retry_after", None)
+            if retry_after is not None:
+                # A 429 that outlasted the retry budget. Waiting the adaptive
+                # interval here would ignore what the server actually asked
+                # for and go straight back to hammering it.
+                self.next_delay_override = float(retry_after)
+                logger.warning(
+                    "source asked for %ss before the next request: %s", retry_after, exc
+                )
+            else:
+                logger.warning("transient source error, will retry next poll: %s", exc)
             self.monitor.record_poll(ok=False, new_posts=0)
             return 0
         except PermanentSourceError as exc:
@@ -162,7 +175,11 @@ class AgentRunner:
                     break
                 # No point sleeping after the final bounded iteration, since
                 # the caller (--once, tests) is about to exit anyway.
-                self.sleep(self.interval.next_delay(new_count > 0))
+                delay = self.interval.next_delay(new_count > 0)
+                if self.next_delay_override is not None:
+                    delay = max(delay, self.next_delay_override)
+                    self.next_delay_override = None
+                self.sleep(delay)
         except KeyboardInterrupt:
             pass
         print(
