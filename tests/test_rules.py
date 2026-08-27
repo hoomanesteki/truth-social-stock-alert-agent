@@ -247,7 +247,9 @@ def test_fox_news_sunday_suppressed(detector: RuleDetector):
 def test_fox_corporation_shares_still_fires(detector: RuleDetector):
     d = detector.detect("Fox Corporation shares are up today")
     assert d.is_stock_related is True
-    assert "FOXA" in _tickers(d)
+    # FOX is the class B line and carries the plain company name; FOXA holds
+    # the Fox News alias. Either is a correct answer for a company sentence.
+    assert {"FOX", "FOXA"} & _tickers(d)
 
 
 def test_abc_news_tonight_suppressed(detector: RuleDetector):
@@ -259,3 +261,29 @@ def test_disney_stock_still_fires(detector: RuleDetector):
     d = detector.detect("Disney stock is up")
     assert d.is_stock_related is True
     assert "DIS" in _tickers(d)
+
+
+def test_dover_air_force_base_is_not_dover_corporation(detector: RuleDetector):
+    """Dover is a place here before it is a company.
+
+    Came out of expanding the lookup table to the S&P 500: DOV started
+    matching "Dover Air Force Base", which he writes about regularly.
+    """
+    d = detector.detect("Heading to Dover Air Force Base to HONOR OUR HEROES!")
+    assert d.is_stock_related is False
+
+
+def test_dover_corporation_with_finance_context_still_fires(detector: RuleDetector):
+    d = detector.detect("Dover Corporation raised its dividend and shares rose")
+    assert d.is_stock_related is True
+    assert "DOV" in _tickers(d)
+
+
+def test_first_on_fox_is_a_news_attribution_not_a_stock(detector: RuleDetector):
+    d = detector.detect("FIRST ON FOX: DHS points to a common sense reason for the change")
+    assert d.is_stock_related is False
+
+
+def test_watching_foxnews_is_not_a_stock_mention(detector: RuleDetector):
+    d = detector.detect("Watching FoxNews with Shannon Bream is always a chore")
+    assert d.is_stock_related is False

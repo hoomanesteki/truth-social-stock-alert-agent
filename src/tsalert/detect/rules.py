@@ -117,7 +117,9 @@ DJT_SIGNOFF_PATTERN = re.compile(r"\bPresident\s+(?:DJT|DONALD\s+J\.?\s+TRUMP)\b
 SUPPRESSION_CUES: dict[str, tuple[str, ...]] = {
     "INTC": ("intelligence", "agencies", "agency", "memo", "briefing", "classified", "sources"),
     "NYT": ("bestselling", "bestseller", "best selling", "columnist", "op-ed", "reporter", "wrote"),
-    "FOXA": ("sunday", "host", "anchor", "show", "interview", "segment", "ratings"),
+    "FOXA": ("sunday", "host", "anchor", "show", "interview", "segment", "ratings",
+             "first on fox", "watching", "coverage", "reported"),
+    "FOX": ("first on fox", "watching", "coverage", "host", "anchor", "show"),
     "DIS": ("news", "tonight", "hosting", "broadcast", "air", "watch", "tune in"),
     "CMCSA": ("news", "anchor", "host", "broadcast", "segment"),
 }

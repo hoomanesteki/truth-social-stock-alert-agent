@@ -29,12 +29,13 @@ from tsalert.llm import GroqClient, GroqError
 
 SYSTEM_PROMPT = """You label social media posts for a stock-mention detector. Follow the definition exactly.
 
-is_stock_related is TRUE only when the post refers to a SPECIFIC, identifiable, publicly
-traded company, either by name or by ticker symbol.
+is_stock_related is TRUE when the post refers to a SPECIFIC, identifiable, tradeable
+instrument: a publicly traded company by name or ticker, or a named index or ETF such as the
+S&P 500, the Nasdaq or the Dow. Generic market talk with no named instrument is not.
 
 category must be exactly one of:
   specific_equity  a named public company or its ticker            -> is_stock_related true
-  index_or_etf     S&P 500, Nasdaq, the Dow, SPY, QQQ              -> is_stock_related false
+  index_or_etf     S&P 500, Nasdaq, the Dow, SPY, QQQ              -> is_stock_related true
   macro_market     generic market or economy talk, no named entity -> is_stock_related false
   not_financial    everything else                                 -> is_stock_related false
 

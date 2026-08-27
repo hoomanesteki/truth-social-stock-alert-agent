@@ -540,3 +540,26 @@ def test_repeated_transient_failures_raise_the_alarm(tmp_path):
     store.close()
 
     assert "repeated_errors" in {name for name, _detail in dispatcher.ops}
+
+
+def test_backfilled_history_never_alerts(tmp_path):
+    """Backfill stores history. History must not page anyone.
+
+    Backfilled posts arrive with no detection, so the undetected backlog pass
+    picks them up on the next poll and used to dispatch every positive in the
+    archive.
+    """
+    import json as _json
+    from tsalert.sources.parse import parse_status
+
+    store = make_store(tmp_path)
+    for item in _json.loads(DEMO_FIXTURE.read_text()):
+        store.upsert_post(parse_status(item, "backfill"), alert_eligible=False)
+
+    dispatcher = FakeDispatcher()
+    runner = make_runner(EmptySource(), dispatcher, store)
+    runner.poll_once()
+    runner.poll_once()
+
+    store.close()
+    assert dispatcher.dispatched == []

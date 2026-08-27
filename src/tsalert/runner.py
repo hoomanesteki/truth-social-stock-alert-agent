@@ -130,16 +130,11 @@ class AgentRunner:
                 if last_id is None or id_sort_key(post.id) > id_sort_key(last_id):
                     last_id = post.id
 
-                is_new = self.store.upsert_post(post)
+                is_new = self.store.upsert_post(post, alert_eligible=not priming)
                 if not is_new:
                     continue
 
                 self._detect_and_dispatch(post, alert=not priming)
-                if priming:
-                    # Record that this one is deliberately not alertable, or the
-                    # recovery sweep finds a stock related post with no alerts
-                    # row next poll and delivers the whole first page.
-                    self.store.set_alert_eligible(post.id, False)
                 new_count += 1
         except (ValueError, TypeError) as exc:
             # An unexpected id shape or malformed post must never kill the
@@ -213,7 +208,10 @@ class AgentRunner:
                 fetched_at=post.fetched_at.isoformat(),
                 detected_at=datetime.now(timezone.utc).isoformat(),
             )
-        if detection.is_stock_related and alert:
+        # Eligibility is checked here rather than at the call sites because
+        # the undetected backlog path also lands in this method, and that is
+        # how backfilled history used to reach the dispatcher.
+        if detection.is_stock_related and alert and self.store.is_alert_eligible(post.id):
             self.dispatcher.dispatch(post, detection)
             self.alerts_sent += 1
 

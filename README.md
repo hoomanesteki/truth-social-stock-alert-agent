@@ -9,8 +9,8 @@ post mentions a publicly traded company, by ticker or by name. Runs locally.
 flowchart LR
   A["Truth Social<br/>JSON API"] -->|primary| D["dedup<br/><i>sqlite, survives restart</i>"]
   B["trumpstruth.org<br/>RSS mirror"] -.->|"fallback after<br/>3 failures"| D
-  D --> R["rule detector<br/><i>95 ticker lexicon</i>"]
-  R -->|"candidate,<br/>about 1% of posts"| L["LLM confirm<br/><i>Groq</i>"]
+  D --> R["rule detector<br/><i>531 row lookup table</i>"]
+  R -->|"candidate,<br/>about 1.3% of posts"| L["LLM confirm<br/><i>Groq</i>"]
   R -->|"no candidate"| X["ignored"]
   L --> S["alert<br/><i>Telegram + console</i>"]
   D --> H["health monitor"]
@@ -135,7 +135,10 @@ uv run python scripts/evaluate.py
 uv run python scripts/latency_report.py
 ```
 
-All sampling is seeded, so reruns are byte identical.
+Sampling is seeded, so a rebuild is deterministic. The committed sample was frozen before
+the lookup table grew to 531 rows, so rebuilding today draws a different candidate stratum.
+That is deliberate: the labels belong to the frozen sample, and re-drawing it would throw
+them away.
 
 ### Docker
 
@@ -211,17 +214,19 @@ business (Fox News; New York Times and NBC). Separating an outlet named as a com
 named as a source is the open problem, and the LLM arm gets it right. The remaining miss is a
 company named only inside a URL.
 
-**The labels, and the trade-off.** Hand labelling 150 posts is slow, so I used frontier
-models and reviewed the output: `gpt-oss-120b` proposed one per post, a stronger model
-adjudicated all 150 against a written rubric, a third family relabelled blind and agreed on
-149 binary verdicts, and I went through every row.
+**The labels, and the trade-off.** Models pre-labelled and I reviewed by hand.
+`gpt-oss-120b` proposed a label per post, a stronger model adjudicated all 150 against a
+written rubric, a third family relabelled blind and agreed on 149 binary verdicts, and I went
+through every row myself and made the final call. Labelling 150 posts cold would have taken a
+day I did not have; pre-labelling turned it into an afternoon of review.
 
-That buys speed and costs independence. Different families share blind spots, so three models
-agreeing is weaker than three people agreeing, and reviewing a proposal anchors you in a way
-labelling cold does not. The effect is visible: the LLM arm scores 1.000 because the labels
-descend from its own predictions, which measures consistency, not accuracy. `evaluate.py`
-warns rather than printing a clean number. The rule arm predates the labelling, so its numbers
-are clean. The scored predictions are `gpt-oss-120b`; the agent runs `qwen3.6-27b`.
+The trade-off is independence. Different model families share blind spots, so three agreeing
+is weaker evidence than three people agreeing, and reviewing a proposal anchors you in a way
+labelling cold does not. The effect is measurable: the LLM arm scores 1.000 because the labels
+descend from its own predictions, which measures agreement, not accuracy, and `evaluate.py`
+warns instead of printing that as a result. The rule arm is unaffected, built before any
+labelling happened, so its numbers stand on their own. One more caveat: the scored predictions
+are `gpt-oss-120b` while the agent runs `qwen3.6-27b`.
 
 **Latency** over a 90 poll run: 26, 79 and 154 seconds from post to fetch, then 7.4 ms to
 decide and 0.3 ms to hand to the console. Telegram adds a round trip I did not measure
@@ -279,8 +284,8 @@ src/tsalert/
   llm.py                  Groq client with an on-disk cache
   sentiment.py            bonus: bullish/bearish/neutral scoring on alerts
 scripts/                  backfill, eval set construction, labeling, evaluation, latency,
-                          dashboard (bonus: local read only http.server dashboard)
+                          dashboard (bonus: local control panel on http.server)
 data/                     the 45 day archive, the lexicon, the evaluation set
-tests/                    222 tests, offline, against recorded fixtures
+tests/                    231 tests, offline, against recorded fixtures
 ```
 

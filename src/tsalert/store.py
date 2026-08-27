@@ -110,6 +110,12 @@ class Store:
             )
             self._conn.commit()
 
+    def is_alert_eligible(self, post_id: str) -> bool:
+        row = self._conn.execute(
+            "SELECT alert_eligible FROM posts WHERE id=?", (post_id,)
+        ).fetchone()
+        return True if row is None else bool(row["alert_eligible"])
+
     def set_alert_eligible(self, post_id: str, eligible: bool) -> None:
         """Mark whether a post may ever produce an alert.
 
@@ -122,12 +128,12 @@ class Store:
         )
         self._conn.commit()
 
-    def upsert_post(self, post: Post) -> bool:
+    def upsert_post(self, post: Post, alert_eligible: bool = True) -> bool:
         cur = self._conn.execute(
             "INSERT OR IGNORE INTO posts "
             "(id, account, created_at, text, url, raw_html, is_reply, is_repost, "
-            "is_quote, has_media, source, fetched_at, quoted_text) "
-            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            "is_quote, has_media, source, fetched_at, quoted_text, alert_eligible) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
             (
                 post.id,
                 post.account,
@@ -142,6 +148,7 @@ class Store:
                 post.source,
                 post.fetched_at.isoformat(),
                 post.quoted_text,
+                int(alert_eligible),
             ),
         )
         self._conn.commit()

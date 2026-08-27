@@ -146,7 +146,7 @@ DJT,Trump Media & Technology Group,Trump Media|Truth Social|TMTG|Trump Media and
 DLR,Digital Realty,Digital Realty,medium,,equity,S&P 500 constituent
 DLTR,Dollar Tree,Dollar Tree,low,,equity,S&P 500 constituent
 DOC,Healthpeak Properties,Healthpeak Properties,medium,,equity,S&P 500 constituent
-DOV,Dover Corporation,Dover|Dover Corporation,medium,,equity,S&P 500 constituent
+DOV,Dover Corporation,Dover|Dover Corporation,medium,Dover,equity,Dover is also an air base and a city
 DOW,Dow Inc.,Dow|Dow Inc.,medium,,equity,S&P 500 constituent
 DPZ,Domino's,Domino's,medium,,equity,S&P 500 constituent
 DRI,Darden Restaurants,Darden Restaurants,medium,,equity,S&P 500 constituent
@@ -197,7 +197,7 @@ FISV,Fiserv,Fiserv,low,,equity,S&P 500 constituent
 FITB,Fifth Third Bancorp,Fifth Third Bancorp,low,,equity,S&P 500 constituent
 FIX,Comfort Systems USA,Comfort Systems USA,medium,,equity,S&P 500 constituent
 FLEX,Flex Ltd.,Flex|Flex Ltd.,low,,equity,S&P 500 constituent
-FOX,Fox Corporation (Class B),Fox|Fox Corporation (Class B),medium,,equity,S&P 500 constituent
+FOX,Fox Corporation (Class B),Fox Corporation,medium,,equity,"class B; bare Fox is too ambiguous to match, FOXA carries Fox News"
 FOXA,Fox Corporation,Fox News|Fox Corporation,medium,,equity,Fox is also a surname and an animal
 FRT,Federal Realty Investment Trust,Federal Realty Investment Trust,medium,,equity,S&P 500 constituent
 FSLR,First Solar,First Solar,low,,equity,S&P 500 constituent

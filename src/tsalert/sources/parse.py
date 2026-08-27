@@ -64,7 +64,12 @@ def parse_status(status: object, source: str, fetched_at: datetime | None = None
 
     created_at = _parse_created_at(status.get("created_at"))
 
+    # Nested shapes need the same treatment as the top level. A string where
+    # an object belongs raises AttributeError otherwise, which is not a
+    # SourceError, so it slips past the ratio check and ends the process.
     reblog = status.get("reblog")
+    if reblog is not None and not isinstance(reblog, dict):
+        raise MalformedStatusError(f"reblog is {type(reblog).__name__}, expected an object")
     is_repost = reblog is not None
     # A repost's own content/url/media describe the wrapper, not the original
     # post, so pull those from the inner status while keeping the outer id
@@ -75,14 +80,22 @@ def parse_status(status: object, source: str, fetched_at: datetime | None = None
     text = html_to_text(raw_html)
     url = content_source.get("url") or ""
     media = content_source.get("media_attachments") or []
+    if not isinstance(media, list):
+        raise MalformedStatusError(
+            f"media_attachments is {type(media).__name__}, expected a list"
+        )
 
     account = status.get("account") or {}
+    if not isinstance(account, dict):
+        raise MalformedStatusError(f"account is {type(account).__name__}, expected an object")
     account_name = account.get("username") or account.get("acct") or ""
 
     # A quote post's own content is just a "RT: <url>" stub, with the actual
     # quoted words living in a sibling `quote` dict. Without this, a quote
     # post about a stock is a silent false negative in detection.
     quote = status.get("quote")
+    if quote is not None and not isinstance(quote, dict):
+        raise MalformedStatusError(f"quote is {type(quote).__name__}, expected an object")
     quoted_text = html_to_text(quote.get("content") or "") if isinstance(quote, dict) else ""
 
     return Post(

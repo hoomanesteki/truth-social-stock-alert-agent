@@ -82,3 +82,25 @@ def test_html_to_text_preserves_anchor_visible_text():
 
 def test_html_to_text_collapses_excess_newlines():
     assert html_to_text("a<br/><br/><br/><br/>b") == "a\n\nb"
+
+
+@pytest.mark.parametrize(
+    "field, value",
+    [("reblog", "bad"), ("account", "bad"), ("media_attachments", 3), ("quote", "bad")],
+)
+def test_nested_fields_of_the_wrong_type_are_malformed_not_crashes(field, value):
+    """A wrong type nested inside an otherwise fine status must be catchable.
+
+    AttributeError and TypeError are not SourceError, so they escape the ratio
+    check that separates a few bad rows from a changed schema, and end the
+    process instead of being counted.
+    """
+    status = {
+        "id": "1",
+        "created_at": "2026-01-01T00:00:00Z",
+        "content": "<p>x</p>",
+        "account": {"username": "realDonaldTrump"},
+    }
+    status[field] = value
+    with pytest.raises(MalformedStatusError):
+        parse_status(status, "test")

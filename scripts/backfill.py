@@ -40,6 +40,8 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     return parser.parse_args(argv)
 
 
+# Backfilled posts are history. They get stored and later detected, but they
+# must never produce an alert, so they go in ineligible.
 def main(argv: list[str] | None = None) -> int:
     args = parse_args(argv)
     if args.delay < DEFAULT_DELAY:
@@ -82,7 +84,7 @@ def main(argv: list[str] | None = None) -> int:
                     break
 
                 for post in page:
-                    store.upsert_post(post)
+                    store.upsert_post(post, alert_eligible=False)
                     out_file.write(json.dumps(post.to_dict()) + "\n")
                     total_posts += 1
                     if oldest_seen is None or post.created_at < oldest_seen:
