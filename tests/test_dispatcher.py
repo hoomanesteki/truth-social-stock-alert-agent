@@ -432,3 +432,157 @@ def test_recovered_alerts_do_not_enter_the_latency_table(tmp_path):
         assert len(channel.sent) == 1
         rows = store._conn.execute("SELECT COUNT(*) FROM latency").fetchone()[0]
     assert rows == 0
+
+
+class DownChannel:
+    """A channel that is unreachable until someone flips it back on.
+
+    Models an outage rather than a flaky send: every attempt fails the same
+    way, which is what a blocked port or a dead host actually looks like.
+    """
+
+    def __init__(self, name: str):
+        self.name = name
+        self.up = False
+        self.sent: list[str] = []
+
+    def is_configured(self) -> bool:
+        return True
+
+    def send(self, text: str) -> None:
+        self.sent.append(text)
+        if not self.up:
+            raise TransientSourceError("connection timed out")
+
+
+def test_a_down_channel_is_probed_once_per_poll_not_once_per_alert(tmp_path):
+    """A burst of alerts must not cost the full retry budget each.
+
+    Found by running against a network that blocks api.telegram.org. Four
+    alerts meant four separate rounds of four timeouts plus backoff, so a
+    poll that should take a second took nearly six minutes and the agent
+    fell behind. One probe per poll is enough to learn the channel is down.
+    """
+    telegram = DownChannel("telegram")
+    console = FakeChannel("console")
+    posts = [make_post(str(i)) for i in range(1, 5)]
+
+    with Store(tmp_path / "burst.db") as store:
+        dispatcher = AlertDispatcher([telegram, console], store, max_attempts=4, sleep=no_sleep)
+        for post in posts:
+            store.upsert_post(post)
+            dispatcher.dispatch(post, make_detection(post.id))
+
+        # One alert paid the full budget, the other three cost nothing.
+        assert len(telegram.sent) == 4
+        assert len(console.sent) == 4
+
+        rows = dict(
+            store._conn.execute(
+                "SELECT status, count(*) FROM alerts WHERE channel='telegram' GROUP BY status"
+            ).fetchall()
+        )
+        assert rows == {"failed": 1, "pending": 3}
+
+        # Console is untouched by the outage on the other channel.
+        delivered = store._conn.execute(
+            "SELECT count(*) FROM alerts WHERE channel='console' AND status='delivered'"
+        ).fetchone()[0]
+        assert delivered == 4
+
+
+def test_the_queue_flushes_once_the_channel_comes_back(tmp_path):
+    """Skipping must delay alerts, never drop them.
+
+    The three skipped alerts are left 'pending' with no store write at all,
+    so none of their max_cycles retry budget is spent on a send that never
+    left the machine. retry_failed clears the down mark at the top of the
+    next poll, which is what gives the channel its next probe.
+    """
+    telegram = DownChannel("telegram")
+    posts = [make_post(str(i)) for i in range(1, 5)]
+
+    with Store(tmp_path / "flush.db") as store:
+        dispatcher = AlertDispatcher([telegram], store, max_attempts=4, sleep=no_sleep)
+        for post in posts:
+            store.upsert_post(post)
+            store.save_detection(make_detection(post.id))
+            dispatcher.dispatch(post, make_detection(post.id))
+
+        assert store.retryable_alerts(dispatcher.max_cycles) != []
+
+        telegram.up = True
+        results = dispatcher.retry_failed()
+
+        assert len(results) == 4
+        assert all(r.ok for r in results)
+        remaining = store._conn.execute(
+            "SELECT count(*) FROM alerts WHERE channel='telegram' AND status!='delivered'"
+        ).fetchone()[0]
+        assert remaining == 0
+
+
+def test_a_bad_token_does_not_mark_the_channel_down(tmp_path):
+    """A permanent failure is fast, so it is not evidence of an outage.
+
+    Marking the channel down on a 4xx would make one bad chat id stop
+    delivery to every other post in the poll, which is the opposite of what
+    a permanent failure means: it is about that request, not the channel.
+    """
+    channel = FakeChannel(
+        "telegram",
+        outcomes=[PermanentSourceError("bad chat id"), None, None],
+    )
+    posts = [make_post(str(i)) for i in range(1, 4)]
+
+    with Store(tmp_path / "permanent.db") as store:
+        dispatcher = AlertDispatcher([channel], store, max_attempts=4, sleep=no_sleep)
+        for post in posts:
+            store.upsert_post(post)
+            dispatcher.dispatch(post, make_detection(post.id))
+
+        assert len(channel.sent) == 3
+        rows = dict(
+            store._conn.execute(
+                "SELECT status, count(*) FROM alerts GROUP BY status"
+            ).fetchall()
+        )
+        assert rows == {"permanent_failure": 1, "delivered": 2}
+
+
+def test_an_outage_does_not_burn_the_retry_budget(tmp_path):
+    """A long outage must not quietly abandon the alert that probed it.
+
+    cycles is the lifetime retry budget, and it exists to give up on an
+    alert that cannot be delivered. A channel being down is not that: it
+    says nothing about the alert. Whichever alert happens to be first in the
+    queue does the probing, so counting the probe would abandon it after
+    max_cycles polls while every alert behind it, skipped and never counted,
+    waited indefinitely.
+    """
+    telegram = DownChannel("telegram")
+    posts = [make_post(str(i)) for i in range(1, 4)]
+
+    with Store(tmp_path / "outage.db") as store:
+        dispatcher = AlertDispatcher(
+            [telegram], store, max_attempts=2, max_cycles=3, sleep=no_sleep
+        )
+        for post in posts:
+            store.upsert_post(post)
+            store.save_detection(make_detection(post.id))
+            dispatcher.dispatch(post, make_detection(post.id))
+
+        for _ in range(10):  # far more polls than max_cycles
+            dispatcher.retry_failed()
+
+        cycles = [
+            row[0]
+            for row in store._conn.execute("SELECT cycles FROM alerts").fetchall()
+        ]
+        assert cycles == [0, 0, 0]
+        assert len(store.retryable_alerts(dispatcher.max_cycles)) == 3
+
+        telegram.up = True
+        results = dispatcher.retry_failed()
+        assert len(results) == 3
+        assert all(r.ok for r in results)

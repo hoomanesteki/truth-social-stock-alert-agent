@@ -221,4 +221,9 @@ __marimo__/
 data/*.db
 data/*.db-wal
 data/*.db-shm
+# Runtime cache written by whatever posts the agent happens to have seen, so
+# it differs per machine and is not worth versioning. The eval cache under
+# data/eval/ is committed on purpose, since it makes the scores reproducible
+# without an API key.
+data/llm_detector_cache.jsonl
 logs/*.jsonl

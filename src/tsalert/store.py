@@ -341,11 +341,24 @@ class Store:
         failed = self._conn.execute(
             "SELECT COUNT(*) FROM alerts WHERE status='failed'"
         ).fetchone()[0]
+        # Queued is not the same as failed. During a channel outage the
+        # dispatcher skips sends rather than burning each alert's retry
+        # budget, which leaves rows at 'pending' with nothing written. Those
+        # alerts are waiting, not lost, and without a count for them an
+        # operator sees a backlog of zero while it quietly grows.
+        queued = self._conn.execute(
+            "SELECT COUNT(*) FROM alerts WHERE status='pending'"
+        ).fetchone()[0]
+        permanent = self._conn.execute(
+            "SELECT COUNT(*) FROM alerts WHERE status='permanent_failure'"
+        ).fetchone()[0]
         return {
             "posts": posts,
             "stock_related": stock_related,
             "alerts_delivered": delivered,
+            "alerts_queued": queued,
             "alerts_failed": failed,
+            "alerts_given_up": permanent,
         }
 
     @staticmethod

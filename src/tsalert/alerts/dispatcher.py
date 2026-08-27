@@ -48,6 +48,11 @@ class AlertDispatcher:
         self.base_delay = base_delay
         self.sleep = sleep
         self._rng = random.Random()
+        # Channels that used their whole retry budget and still failed. A
+        # channel in here is skipped for the rest of the pass. Cleared at the
+        # top of retry_failed, which is the first thing every poll does, so
+        # each poll gives a down channel exactly one probe.
+        self._down_channels: set[str] = set()
 
     def dispatch(self, post: Post, detection: Detection,
                  time_it: bool = True) -> list[DeliveryResult]:
@@ -78,7 +83,10 @@ class AlertDispatcher:
             # heartbeat stale) can legitimately fire again later and each
             # occurrence should be delivered, not swallowed by a claim row
             # left over from the first time it fired.
-            ok, attempts, error, _permanent = self._send_with_retries(channel, text)
+            if channel.name in self._down_channels:
+                continue
+            ok, attempts, error, permanent = self._send_with_retries(channel, text)
+            self._note_channel_health(channel.name, ok, permanent)
             results.append(
                 DeliveryResult(
                     channel=channel.name,
@@ -109,6 +117,10 @@ class AlertDispatcher:
         (the per-call send budget). Meant to be called at the start of each
         poll cycle.
         """
+        # Every poll starts here, so this is where a channel marked down
+        # gets its next chance. Without the reset, one outage would silence
+        # the channel until the process restarted.
+        self._down_channels.clear()
         results = []
         for post_id, channel_name in self.store.retryable_alerts(self.max_cycles):
             channel = self._find_channel(channel_name)
@@ -187,7 +199,33 @@ class AlertDispatcher:
         is_retry: bool = False,
         time_it: bool = True,
     ) -> DeliveryResult:
+        if channel.name in self._down_channels:
+            # Nothing is written to the store on purpose. The row keeps
+            # whatever status it already had, 'pending' from claim_alert or
+            # 'failed' from an earlier try, and retryable_alerts picks both
+            # of those up later. Recording a failure here instead would spend
+            # one of the alert's max_cycles retries on a send that never
+            # happened, so a long outage would exhaust the retry budget of
+            # every queued alert without a single request leaving the machine.
+            return DeliveryResult(
+                channel=channel.name,
+                post_id=post.id,
+                ok=False,
+                attempts=0,
+                error="channel is down, left for the next poll",
+                delivered_at=None,
+            )
         ok, attempts, error, permanent = self._send_with_retries(channel, text)
+        self._note_channel_health(channel.name, ok, permanent)
+        # A transient failure that took the whole channel down says nothing
+        # about this particular alert, so it must not spend a retry cycle.
+        # Otherwise the one alert unlucky enough to be the probe would be
+        # abandoned after max_cycles polls of an outage while the alerts
+        # behind it, skipped and never counted, waited indefinitely. Same
+        # outage, opposite outcomes, decided by queue order.
+        outage = not ok and not permanent
+        if outage:
+            is_retry = False
         if ok:
             status = "delivered"
         elif permanent:
@@ -222,6 +260,32 @@ class AlertDispatcher:
             error=error,
             delivered_at=delivered_at,
         )
+
+    def _note_channel_health(self, name: str, ok: bool, permanent: bool) -> None:
+        """Track whether a channel is merely flaky or actually down.
+
+        _send_with_retries already spends four attempts with backoff on a
+        transient failure, so a call that comes back exhausted is not a blip,
+        it is an outage. Found this by running with Telegram blocked at the
+        network layer: every alert in the poll paid the full budget on its
+        own, four timeouts plus backoff each, and one poll that should have
+        taken a second took nearly six minutes. Alerts were never lost, but
+        the agent fell far enough behind that the latency target was gone.
+
+        A permanent failure does not count. A bad token fails immediately on
+        the first attempt, so it costs no time, and it is already kept out of
+        every future retry by its status.
+        """
+        if ok:
+            self._down_channels.discard(name)
+            return
+        if permanent:
+            return
+        if name not in self._down_channels:
+            logger.warning(
+                "channel %s failed every attempt, skipping it for the rest of this poll", name
+            )
+        self._down_channels.add(name)
 
     def _send_with_retries(self, channel: AlertChannel, text: str) -> tuple[bool, int, str, bool]:
         """Send with in-call backoff. Returns (ok, attempts, error, permanent).

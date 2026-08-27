@@ -40,7 +40,7 @@ Every failure below was tested by forcing it, not just handled in principle.
 | Polls succeed but nothing arrives | `no_new_posts` heartbeat fires. State is on disk, so a restart cannot reset the clock |
 | Groq unavailable | The LLM arm falls back to the rule verdict and the agent keeps alerting |
 | Sentiment model fails | The alert goes out without the sentiment line |
-| Telegram down | Console still delivers. Telegram is retried later, since delivery is tracked per channel rather than per post |
+| Telegram down | Console still delivers. One alert probes the channel, the rest of the poll skips it, and they queue for the next poll. Delivery is tracked per channel, so one channel being down cannot hold up another |
 | Process dies mid delivery | The alert is re-sent on the next poll. The claim is keyed on post and channel, so a restart cannot repeat what already completed. Delivery is at least once, not exactly once |
 | Process dies before detection | The next poll re-checks anything left undetected, so it is still caught |
 
@@ -65,6 +65,10 @@ cp .env.example .env      # then fill in the values you want
 
 Every credential is optional. With none set, the agent still runs and prints alerts to the
 console.
+
+Telegram is blocked outright on some networks, including whole countries. If
+`setup_telegram.py` reports that it cannot reach the API, that is a blocked port rather than a
+bad token, and the console channel needs no network at all.
 
 | Variable | Needed for |
 | --- | --- |
@@ -140,6 +144,10 @@ the lookup table grew to 531 rows, so rebuilding today draws a different candida
 That is deliberate: the labels belong to the frozen sample, and re-drawing it would throw
 them away.
 
+`latency_report.py` reads timings recorded by live polls, so on a fresh clone it has nothing
+to report and prints zeros. The numbers in the write-up come from a run against the real
+account.
+
 ### Docker
 
 ```bash
@@ -166,7 +174,7 @@ Truth Social runs a Mastodon fork, so its web client calls
 `/api/v1/accounts/{id}/statuses`: clean JSON, and `min_id` returns only what is new. The
 obstacle is Cloudflare, which 403s both `requests` and `curl`. Impersonating a browser's TLS
 fingerprint gets through, `curl_cffi` set to `safari17_0`. Chrome is still blocked, so that came
-from trial rather than from understanding their rules.
+from trial, not from understanding.
 
 | Option | Verdict |
 | --- | --- |
@@ -174,8 +182,8 @@ from trial rather than from understanding their rules.
 | `trumpstruth.org` RSS mirror | **Fallback.** Same status ids, so failover cannot double-alert |
 | Headless browser, aggregators | Rejected. Slower and more brittle, no gain over JSON |
 
-It is also the most fragile, depending on a Cloudflare setting I neither control nor get
-warned about, which is why the mirror sits behind it.
+It is also the most fragile, resting on a Cloudflare setting I neither control nor get warned
+about, which is why the mirror sits behind it.
 
 **Polling** floats 30 to 60 seconds. Replaying the real posting history gives a median wait of
 21 seconds and a worst case of 60. That costs volume: roughly 1,450 requests a day against 316
@@ -185,8 +193,8 @@ bound the worst case.
 **Detection** pairs a rule baseline with an LLM arm over a 531 row table: the S&P 500, eight
 ETFs, and companies he names outside the index. Each row rates its ticker's ambiguity, and
 riskier ones need more context, because *trade* and *economy* are ordinary political words
-here. Context splits into strong (stock, shares, earnings) and weak. Without that, shouting
-in capitals turns ALL and NOW into noise, and so do names like Ball and Progressive.
+here. Context splits into strong (stock, shares, earnings) and weak. Without that split,
+capitals turn ALL and NOW into noise, and so do names like Ball and Progressive.
 
 ## 2. Results
 
@@ -194,10 +202,10 @@ Three facts from the 1,260 post archive shaped everything. Zero cashtags appear,
 implemented but never exercised. 472 posts, 37 percent, carry no text. And all 60 bare `DJT`
 tokens are his sign-off.
 
-Mentions are rare enough that a random 150 would find almost none, so the set uses three
-groups: candidates (23, every post the rules flagged, labelled completely so precision is
-exact), random (102, reweighted by 3.62 so recall is measurable), and traps (25, lookalikes
-scored separately). Together they hold 15 real mentions.
+Mentions are rare enough that a random 150 would find almost none, so the set is stratified:
+candidates (23, every post the rules flagged, labelled completely so precision is exact),
+random (102, reweighted by 3.62 so recall is measurable), and traps (25, lookalikes scored
+separately). Together they hold 15 real mentions.
 
 | Arm | Class P / R / F1 | Ticker P / R / F1 | Exact set | Traps |
 | --- | --- | --- | --- | --- |
@@ -220,21 +228,20 @@ the rules' recall and ticker accuracy while keeping the LLM's precision.
 **The labels, and the trade-off.** Models pre-labelled and I read every row myself and made
 the final call. `gpt-oss-120b` proposed a label per post, a stronger model adjudicated all 150
 against a written rubric, and a third family relabelled blind and agreed on 149 binary
-verdicts. Labelling cold would have cost a day I did not have; this made it an afternoon.
+verdicts. Labelling cold would have cost a day I did not have.
 
 The trade-off is independence. Model families share blind spots, so three agreeing is weaker
 evidence than three people agreeing, and reviewing a proposal anchors you in a way labelling
 cold does not. One thing is kept clean. The scored LLM arm is `qwen3.6-27b`, the model the
 agent runs, and it never touched the labels. An earlier version scored the labelling model and
-returned 1.000 on all 150 rows, which measured lineage rather than skill. `evaluate.py` now
+returned 1.000 on all 150 rows, measuring lineage rather than skill. `evaluate.py` now
 warns when an arm agrees with the labels completely. The rule arm predates the labelling
 entirely.
 
 **Latency** over a 90 poll run: 26, 79 and 154 seconds from post to fetch, then 7.4 ms to
 decide and 0.3 ms to reach the console. Telegram adds a round trip I did not measure. The poll
-interval is the whole budget. Three samples only, since no other stock post arrived and a
-fourth at 824 seconds is a cold start. They come from a live run, so `latency_report.py`
-prints zeros on a fresh clone.
+interval is the whole budget. Three samples only, a fourth at 824 seconds being a cold
+start.
 
 ## 3. Robustness and ethics
 
@@ -245,9 +252,16 @@ Delivery is at least once. A post and channel pair is claimed in sqlite before s
 restarts and repeat polls cannot resend, but a crash between Telegram accepting and that write
 will resend. Telegram has no idempotency key, and a duplicate beats a miss.
 
+The one bug I would not have found by reasoning came from my own network blocking Telegram.
+Nothing was lost, but every alert in the poll spent the full retry budget alone, four timeouts
+and backoff each, so a poll that should take a second took nearly six minutes. A channel that
+exhausts its whole budget is down, not flaky, so it is skipped for the rest of the poll and
+probed once on the next. Skipped alerts stay queued rather than counted as failures, since
+spending their budget on sends that never happened would discard them. After: 88 seconds.
+
 Politeness is in code, not a comment promising it: a 2.5 second floor between requests, an
-hourly cap that refuses past 600, `Retry-After` honoured, strictly sequential requests. The
-cap matters most, since backoff stays correct right until a loop bug turns it into a hammer.
+hourly cap that refuses past 600, `Retry-After` honoured, requests strictly sequential. The cap
+matters most, since backoff stays correct right up until a loop bug turns it into a hammer.
 
 This reads public pages with no account and keeps only public post text. The mirror's
 `robots.txt` allows crawling; Truth Social publishes none. Automated access likely conflicts with
@@ -287,6 +301,6 @@ src/tsalert/
 scripts/                  backfill, eval set construction, labeling, evaluation, latency,
                           dashboard (bonus: local control panel on http.server)
 data/                     the 45 day archive, the lexicon, the evaluation set
-tests/                    231 tests, offline, against recorded fixtures
+tests/                    235 tests, offline, against recorded fixtures
 ```
 

@@ -21,10 +21,34 @@ from dotenv import dotenv_values
 
 API = "https://api.telegram.org"
 
+UNREACHABLE = f"""cannot reach {API}.
+
+The name resolves but the connection times out, which is what a network level
+block looks like. Telegram is blocked outright in some countries and on plenty
+of corporate and campus networks. Nothing here is wrong with the token or the
+code, the packets are not getting out.
+
+Options:
+  - run this on a network that allows Telegram, or through a VPN
+  - skip Telegram entirely. The console channel needs no network at all:
+        uv run python agent.py run --once --source demo
+    and the agent keeps working with Telegram unset."""
+
 
 def call(token: str, method: str):
-    r = requests.get(f"{API}/bot{token}/{method}", impersonate="safari17_0", timeout=20)
-    return r.status_code, r.json()
+    """One Bot API call. Network failures are reported, not raised.
+
+    Returns (status, payload). Status is None when the request never got a
+    reply, which the caller reports as unreachable rather than as a bad token.
+    """
+    try:
+        r = requests.get(f"{API}/bot{token}/{method}", impersonate="safari17_0", timeout=20)
+    except requests.errors.RequestsError as exc:
+        return None, {"error": str(exc)}
+    try:
+        return r.status_code, r.json()
+    except ValueError:
+        return r.status_code, {"error": r.text[:200]}
 
 
 def write_chat_id(env_path: Path, chat_id: str) -> None:
@@ -51,6 +75,9 @@ def main() -> int:
         return 1
 
     status, data = call(token, "getMe")
+    if status is None:
+        print(UNREACHABLE)
+        return 1
     if status != 200 or not data.get("ok"):
         print(f"the token was rejected: {data}")
         return 1
@@ -58,6 +85,9 @@ def main() -> int:
     print(f"bot: @{username}")
 
     status, data = call(token, "getUpdates")
+    if status is None:
+        print(UNREACHABLE)
+        return 1
     chats = {}
     for update in data.get("result", []):
         message = update.get("message") or update.get("channel_post") or {}
@@ -66,7 +96,7 @@ def main() -> int:
             chats[chat["id"]] = chat
 
     if not chats:
-        print(f"\nNo messages yet, so there is no chat to send to.")
+        print("\nNo messages yet, so there is no chat to send to.")
         print(f"Open Telegram, search for @{username}, send it any message, then run this again.")
         return 1
 
@@ -84,13 +114,21 @@ def main() -> int:
 
     if args.no_test:
         return 0
-    r = requests.post(
-        f"{API}/bot{token}/sendMessage",
-        json={"chat_id": chat_id,
-              "text": "Alert agent connected. This is a test message.",
-              "disable_web_page_preview": True},
-        impersonate="safari17_0", timeout=20)
-    if r.status_code == 200 and r.json().get("ok"):
+    try:
+        r = requests.post(
+            f"{API}/bot{token}/sendMessage",
+            json={"chat_id": chat_id,
+                  "text": "Alert agent connected. This is a test message.",
+                  "disable_web_page_preview": True},
+            impersonate="safari17_0", timeout=20)
+    except requests.errors.RequestsError as exc:
+        print(f"the chat id is saved, but the test message did not go out: {exc}")
+        return 1
+    try:
+        ok = r.status_code == 200 and r.json().get("ok")
+    except ValueError:
+        ok = False
+    if ok:
         print("test message sent, check Telegram")
         return 0
     print(f"test message failed: {r.text[:200]}")
