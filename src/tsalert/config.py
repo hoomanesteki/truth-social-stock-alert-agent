@@ -6,6 +6,29 @@ from dataclasses import dataclass
 from dotenv import load_dotenv
 
 
+class ConfigError(ValueError):
+    """A setting is missing or does not make sense."""
+
+
+def _positive_int(name: str, raw, default: int) -> int:
+    """Read a setting that has to be a positive whole number.
+
+    A negative poll interval turns every sleep into zero and the loop spins
+    against someone else's server. The throttle and the hourly cap still
+    bound that, but a typo in .env should be caught here rather than left
+    for a downstream guard to absorb.
+    """
+    if raw is None:
+        return default
+    try:
+        value = int(raw)
+    except (TypeError, ValueError):
+        raise ConfigError(f"{name} must be a whole number, got {raw!r}") from None
+    if value <= 0:
+        raise ConfigError(f"{name} must be greater than zero, got {value}")
+    return value
+
+
 @dataclass(frozen=True)
 class Config:
     db_path: str = "data/agent.db"
@@ -34,20 +57,16 @@ class Config:
             account=os.environ.get("ACCOUNT", d.account),
             account_id=os.environ.get("ACCOUNT_ID", d.account_id),
             source=os.environ.get("SOURCE", d.source),
-            poll_interval_seconds=int(os.environ.get("POLL_INTERVAL_SECONDS", d.poll_interval_seconds)),
-            quiet_poll_interval_seconds=int(
-                os.environ.get("QUIET_POLL_INTERVAL_SECONDS", d.quiet_poll_interval_seconds)
-            ),
+            poll_interval_seconds=_positive_int("POLL_INTERVAL_SECONDS", os.environ.get("POLL_INTERVAL_SECONDS"), d.poll_interval_seconds),
+            quiet_poll_interval_seconds=_positive_int("QUIET_POLL_INTERVAL_SECONDS", os.environ.get("QUIET_POLL_INTERVAL_SECONDS"), d.quiet_poll_interval_seconds),
             impersonate=os.environ.get("IMPERSONATE", d.impersonate),
-            request_timeout=int(os.environ.get("REQUEST_TIMEOUT", d.request_timeout)),
+            request_timeout=_positive_int("REQUEST_TIMEOUT", os.environ.get("REQUEST_TIMEOUT"), d.request_timeout),
             log_level=os.environ.get("LOG_LEVEL", d.log_level),
             log_file=os.environ.get("LOG_FILE", d.log_file),
             telegram_bot_token=os.environ.get("TELEGRAM_BOT_TOKEN", d.telegram_bot_token),
             telegram_chat_id=os.environ.get("TELEGRAM_CHAT_ID", d.telegram_chat_id),
             groq_api_key=os.environ.get("GROQ_API_KEY", d.groq_api_key),
             groq_model=os.environ.get("GROQ_MODEL", d.groq_model),
-            heartbeat_stale_minutes=int(
-                os.environ.get("HEARTBEAT_STALE_MINUTES", d.heartbeat_stale_minutes)
-            ),
-            no_posts_alarm_hours=int(os.environ.get("NO_POSTS_ALARM_HOURS", d.no_posts_alarm_hours)),
+            heartbeat_stale_minutes=_positive_int("HEARTBEAT_STALE_MINUTES", os.environ.get("HEARTBEAT_STALE_MINUTES"), d.heartbeat_stale_minutes),
+            no_posts_alarm_hours=_positive_int("NO_POSTS_ALARM_HOURS", os.environ.get("NO_POSTS_ALARM_HOURS"), d.no_posts_alarm_hours),
         )

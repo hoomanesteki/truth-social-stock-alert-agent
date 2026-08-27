@@ -20,6 +20,12 @@ class MalformedStatusError(ValueError):
 def html_to_text(html_content: str) -> str:
     if not html_content:
         return ""
+    if not isinstance(html_content, str):
+        # A non string here means the endpoint changed shape. Raising the
+        # malformed error keeps it inside the ratio check that decides
+        # whether a page is a few bad items or a new schema. A TypeError
+        # would escape that check and take the process down instead.
+        raise MalformedStatusError(f"content is {type(html_content).__name__}, expected str")
     text = _BR_RE.sub("\n", html_content)
     text = _CLOSE_P_RE.sub("\n", text)
     text = _TAG_RE.sub("", text)

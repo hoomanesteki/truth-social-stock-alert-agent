@@ -1,9 +1,17 @@
 from __future__ import annotations
 
 import csv
+import logging
 import re
 from dataclasses import dataclass
 from pathlib import Path
+
+
+logger = logging.getLogger(__name__)
+
+
+class LexiconError(ValueError):
+    """The lexicon file is missing or malformed."""
 
 
 @dataclass(frozen=True)
@@ -46,10 +54,23 @@ class Lexicon:
         entries: dict[str, LexiconEntry] = {}
         with Path(path).open(newline="", encoding="utf-8") as f:
             reader = csv.DictReader(f)
+            required = {"ticker", "company", "aliases", "ambiguity"}
+            missing = required - set(reader.fieldnames or [])
+            if missing:
+                # A KeyError halfway through the file tells you nothing about
+                # which file or which column, and detection silently loses
+                # whatever did not load.
+                raise LexiconError(
+                    f"{path} is missing required column(s): {', '.join(sorted(missing))}"
+                )
             for row in reader:
-                ticker = row["ticker"].strip()
-                company = row["company"].strip()
-                raw_aliases = [a.strip() for a in row["aliases"].split("|") if a.strip()]
+                ticker = (row.get("ticker") or "").strip()
+                if not ticker:
+                    continue
+                if ticker in entries:
+                    logger.warning("%s lists %s more than once, keeping the last row", path, ticker)
+                company = (row.get("company") or "").strip()
+                raw_aliases = [a.strip() for a in (row.get("aliases") or "").split("|") if a.strip()]
                 seen_lower = {a.lower() for a in raw_aliases}
                 if company and company.lower() not in seen_lower:
                     raw_aliases.append(company)
@@ -62,7 +83,7 @@ class Lexicon:
                     ticker=ticker,
                     company=company,
                     aliases=tuple(raw_aliases),
-                    ambiguity=row["ambiguity"].strip(),
+                    ambiguity=(row.get("ambiguity") or "").strip(),
                     ambiguous_aliases=ambiguous_aliases,
                     kind=kind,
                     notes=row["notes"].strip(),
