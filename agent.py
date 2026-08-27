@@ -211,7 +211,10 @@ def cmd_run(args: argparse.Namespace, config: Config) -> int:
             base=config.poll_interval_seconds,
             max_interval=config.quiet_poll_interval_seconds,
         )
-        runner = AgentRunner(source, detector, dispatcher, store, monitor, interval)
+        runner = AgentRunner(
+            source, detector, dispatcher, store, monitor, interval,
+            account=config.account,
+        )
 
         print(f"Source: {source_name}")
         print(f"Detector: {getattr(detector, 'name', detector_name)}")

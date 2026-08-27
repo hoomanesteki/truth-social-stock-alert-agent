@@ -197,10 +197,12 @@ Media-only posts are invisible; OCR is the obvious answer. The lexicon caps reca
 the labels contain `SPGI`, `V`, `TM` and `TMUS`, none among the 95 rows. The same fifteen positives limit every interval here. And the labels are model generated, so the ML comparison is not
 trustworthy yet.
 
-**More accounts** is scheduling, not architecture. Replace the single loop with a priority
-queue keyed on each account's observed posting rate, so a busy account polls every minute and
-a quiet one drifts to fifteen, under one global request budget. Sources are already per
-account and dedup keys on the status id, so storage is unchanged.
+**More accounts** is mostly scheduling. Sources are already per account, posts carry the
+account, dedup keys on the status id, and the polling cursor is namespaced per account, which
+it was not until I tried two accounts against one database and watched the second overwrite
+the first. What is left is the loop: replace it with a priority queue keyed on each account's
+observed posting rate, so a busy one polls every minute and a quiet one drifts to fifteen,
+under a single shared request budget.
 
 **Evaluating in production without labeling everything.** Run both arms over live traffic and
 hand-label only where they disagree, which puts the effort on the decision boundary and turns

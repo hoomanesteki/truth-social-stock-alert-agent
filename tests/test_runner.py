@@ -397,3 +397,17 @@ def test_run_with_max_iterations_performs_exactly_that_many_polls(tmp_path):
     # No sleep after the final bounded iteration, so 3 polls means 2 sleeps.
     assert len(sleep_calls) == 2
     store.close()
+
+
+def test_polling_cursor_is_kept_per_account(tmp_path):
+    """Two accounts in one store must not overwrite each other's high water mark."""
+    from tsalert.runner import _last_seen_key
+
+    assert _last_seen_key("") == "last_seen_post_id"
+    assert _last_seen_key("alice") != _last_seen_key("bob")
+
+    with Store(tmp_path / "multi.db") as store:
+        store.set_state(_last_seen_key("alice"), "1000")
+        store.set_state(_last_seen_key("bob"), "9999")
+        assert store.get_state(_last_seen_key("alice")) == "1000"
+        assert store.get_state(_last_seen_key("bob")) == "9999"

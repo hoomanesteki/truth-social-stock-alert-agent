@@ -15,6 +15,17 @@ from tsalert.store import Store
 logger = logging.getLogger(__name__)
 
 _LAST_SEEN_KEY = "last_seen_post_id"
+
+
+def _last_seen_key(account: str) -> str:
+    """Namespace the polling cursor per account.
+
+    One shared key works fine for a single account and silently breaks the
+    moment there are two: whichever polled last overwrites the other's high
+    water mark, and the other one skips everything in between. Existing
+    single account databases keep the bare key.
+    """
+    return f"{_LAST_SEEN_KEY}:{account}" if account else _LAST_SEEN_KEY
 _UNDETECTED_BACKLOG_LIMIT = 50
 
 
@@ -35,7 +46,9 @@ class AgentRunner:
         monitor: HealthMonitor,
         interval: AdaptiveInterval,
         sleep: Callable[[float], None] = time.sleep,
+        account: str = "",
     ) -> None:
+        self.account = account
         self.source = source
         self.alerts_sent = 0
         # Set when a source asks us to back off for longer than the retry
@@ -68,7 +81,7 @@ class AgentRunner:
         for post in self.store.undetected_posts(limit=_UNDETECTED_BACKLOG_LIMIT):
             self._detect_and_dispatch(post)
 
-        since_id = self.store.get_state(_LAST_SEEN_KEY)
+        since_id = self.store.get_state(_last_seen_key(self.account))
 
         try:
             # A single transient blip (one dropped connection, one 5xx) is
@@ -121,7 +134,7 @@ class AgentRunner:
             return 0
 
         if last_id is not None:
-            self.store.set_state(_LAST_SEEN_KEY, last_id)
+            self.store.set_state(_last_seen_key(self.account), last_id)
 
         self.monitor.record_poll(ok=True, new_posts=new_count)
 
