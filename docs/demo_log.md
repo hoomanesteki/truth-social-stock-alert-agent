@@ -74,7 +74,7 @@ $ uv run python agent.py test-alert
 Active channels: console, telegram
 OPS ALARM: test_alert
 This is a test alert sent from the command line.
-time: 2026-08-27 23:36 UTC
+time: 2026-08-27 14:06 UTC
   console: delivered
   telegram: delivered
 
@@ -97,5 +97,6 @@ Eight records, four posts across two channels, all delivered on the first attemp
 sorted for reading; on disk they interleave, because a post is claimed once per channel as it is
 dispatched.
 
-This section needs a network that allows Telegram. Mine blocks it, which is what turned up the
-outage bug described in the write-up, so the run above was captured where the API was reachable.
+This one needs a network that allows Telegram. This machine's blocks it, which is what turned up
+the outage bug described in the write-up, so the run above was captured earlier in the day from a
+network where the API was reachable. The two runs above it need no network at all.
