@@ -468,6 +468,43 @@ def error_analysis(all_rows: list[dict], arm: str) -> dict:
 # ---------------------------------------------------------------------------
 
 
+def ticker_metrics(headline_rows: list[dict], arm: str) -> dict:
+    """Score which tickers were extracted, not just whether the post was flagged.
+
+    The brief asks the detector to say which stocks a post mentions, so a
+    yes/no score alone can hide an arm that flags the right posts and then
+    names the wrong companies. Micro averaged over ticker sets, weighted the
+    same way the headline numbers are. Exact set accuracy is counted over
+    posts that really are stock related, since that is where a ticker list
+    has to be right.
+    """
+    tp = fp = fn_ = 0.0
+    exact = considered = 0
+    for row in headline_rows:
+        weight = float(row["weight"])
+        truth = row["human_tickers"]
+        pred = row[f"{arm}_tickers"] or set()
+        tp += weight * len(truth & pred)
+        fp += weight * len(pred - truth)
+        fn_ += weight * len(truth - pred)
+        if row["human_positive"]:
+            considered += 1
+            exact += int(truth == pred)
+    precision = tp / (tp + fp) if (tp + fp) else 0.0
+    recall = tp / (tp + fn_) if (tp + fn_) else 0.0
+    f1 = 2 * precision * recall / (precision + recall) if (precision + recall) else 0.0
+    return {
+        "precision": precision,
+        "recall": recall,
+        "f1": f1,
+        "tp": tp,
+        "fp": fp,
+        "fn": fn_,
+        "exact_set": exact,
+        "exact_set_of": considered,
+    }
+
+
 def evaluate(
     labeled_path: Path,
     sample_path: Path,
@@ -514,6 +551,7 @@ def evaluate(
         return result
 
     result["headline"] = {arm: arm_headline_metrics(headline_rows, arm) for arm in ARMS}
+    result["tickers"] = {arm: ticker_metrics(headline_rows, arm) for arm in ARMS}
     result["suppression"] = {arm: suppression_report(joined, arm) for arm in ARMS}
     result["blind"] = blind_subset_report(headline_rows)
     result["errors"] = {arm: error_analysis(joined, arm) for arm in ARMS}
@@ -706,6 +744,26 @@ def _format_report(result: dict) -> str:
             lines.extend(_format_arm_block(arm, result["headline"][arm], agreement.get(arm)))
 
     lines.append("")
+    tickers = result.get("tickers")
+    if tickers:
+        lines.append("## Ticker extraction (which stocks, not just whether)")
+        lines.append("  Micro averaged over ticker sets, weighted like the headline numbers.")
+        lines.append("  Exact set counts posts where the predicted tickers match the labels exactly,")
+        lines.append("  over the posts that really are stock related.")
+        lines.append("")
+        for arm in ARMS:
+            m = tickers.get(arm)
+            if not m:
+                continue
+            lines.append(f"### {arm} arm")
+            lines.append(
+                f"  precision={_fmt(m['precision'])} recall={_fmt(m['recall'])} "
+                f"f1={_fmt(m['f1'])} "
+                f"(tp={_fmt(m['tp'], 1)} fp={_fmt(m['fp'], 1)} fn={_fmt(m['fn'], 1)})"
+            )
+            lines.append(f"  exact ticker set: {m['exact_set']}/{m['exact_set_of']} stock related posts")
+        lines.append("")
+
     lines.append("## Circularity check (arm predictions vs the ground truth labels)")
     lines.append(
         "  Agreement over every labeled row, not just the headline strata. High agreement "

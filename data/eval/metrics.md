@@ -35,6 +35,21 @@ labeled rows counted toward headline (weighted) metrics: 125
   capped at the rule arm's by construction, and its precision inherits whatever the
   LLM arm's predictions carry, including whatever the circularity check below finds.
 
+## Ticker extraction (which stocks, not just whether)
+  Micro averaged over ticker sets, weighted like the headline numbers.
+  Exact set counts posts where the predicted tickers match the labels exactly,
+  over the posts that really are stock related.
+
+### rules arm
+  precision=0.857 recall=0.588 f1=0.697 (tp=18.0 fp=3.0 fn=12.6)
+  exact ticker set: 11/15 stock related posts
+### llm arm
+  precision=1.000 recall=0.967 f1=0.983 (tp=29.6 fp=0.0 fn=1.0)
+  exact ticker set: 14/15 stock related posts
+### combined arm
+  precision=0.897 recall=0.849 f1=0.872 (tp=26.0 fp=3.0 fn=4.6)
+  exact ticker set: 13/15 stock related posts
+
 ## Circularity check (arm predictions vs the ground truth labels)
   Agreement over every labeled row, not just the headline strata. High agreement is expected. Total agreement means the labels came from the arm.
   rules: 146/150 rows agree (0.973)
