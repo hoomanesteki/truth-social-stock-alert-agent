@@ -374,3 +374,34 @@ def test_dispatch_ops_does_not_consume_a_claim(tmp_path):
     count = store._conn.execute("SELECT COUNT(*) FROM alerts").fetchone()[0]
     assert count == 0
     store.close()
+
+
+
+def test_one_failing_channel_does_not_stop_the_other(tmp_path):
+    """A dead Telegram must not cost you the console alert.
+
+    Every other dispatcher test here uses a single channel, so the per
+    channel isolation the README promises was never actually exercised.
+    """
+    post = make_post()
+    detection = make_detection()
+    dead = FakeChannel("telegram", outcomes=[PermanentSourceError("bad chat id")])
+    good = FakeChannel("console")
+
+    with Store(tmp_path / "two.db") as store:
+        store.upsert_post(post)
+        dispatcher = AlertDispatcher([dead, good], store, sleep=lambda _s: None)
+        results = dispatcher.dispatch(post, detection)
+
+        by_channel = {r.channel: r for r in results}
+        assert by_channel["telegram"].ok is False
+        assert by_channel["console"].ok is True
+        assert len(good.sent) == 1
+
+        rows = dict(
+            store._conn.execute(
+                "SELECT channel, status FROM alerts WHERE post_id=?", (post.id,)
+            ).fetchall()
+        )
+        assert rows["console"] == "delivered"
+        assert rows["telegram"] != "delivered"

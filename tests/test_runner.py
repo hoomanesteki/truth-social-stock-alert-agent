@@ -467,3 +467,33 @@ def test_cursor_written_before_namespacing_is_carried_forward(tmp_path):
     assert source.since_ids[-1] == "117157578446470768"
     assert store.get_state("last_seen_post_id:realDonaldTrump") == "117157578446470768"
     store.close()
+
+
+def test_retry_after_overrides_the_adaptive_interval(tmp_path):
+    """A 429 that outlasts the retry budget must set the next poll delay.
+
+    with_retries honours Retry-After inside one poll. This covers the other
+    half: when the wait is longer than the budget, the error escapes and the
+    loop has to wait rather than going straight back at the usual interval.
+    """
+    class RateLimited:
+        name = "rate-limited"
+
+        def fetch_latest(self, since_id=None, limit: int = 20):
+            err = TransientSourceError("rate limited (429)")
+            err.retry_after = 900
+            raise err
+
+        def fetch_history(self, before_id=None, limit: int = 20):
+            return []
+
+        def health(self):
+            return SourceHealth(ok=True, last_success=None, detail="")
+
+    slept: list[float] = []
+    store = make_store(tmp_path)
+    runner = make_runner(RateLimited(), FakeDispatcher(), store, sleep=slept.append)
+    runner.run(max_iterations=2)
+    store.close()
+
+    assert max(slept) >= 900

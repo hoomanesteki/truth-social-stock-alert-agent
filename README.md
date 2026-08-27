@@ -33,9 +33,18 @@ Every failure below was tested by forcing it, not just handled in principle.
 | Polls succeed but nothing arrives | `no_new_posts` heartbeat fires. State is on disk, so a restart cannot reset the clock |
 | Groq unavailable | The LLM arm falls back to the rule verdict and the agent keeps alerting |
 | Sentiment model fails | The alert goes out without the sentiment line |
-| Telegram down | Console still delivers, and the alert is retried on later polls |
+| Telegram down | Console still delivers. Telegram is retried later, since delivery is tracked per channel rather than per post |
 | Process dies mid delivery | The alert is re-sent on the next poll. Idempotency keys on post and channel, so nothing goes twice |
-| Process dies before detection | The post is picked up by a backlog pass and detected on the next poll |
+| Process dies before detection | The next poll re-checks anything left undetected, so it is still caught |
+
+## Demo and write-up
+
+- [docs/demo_log.md](docs/demo_log.md) captures three real runs: the offline replay, the
+  same command again showing dedup holds, and a live delivery to Telegram with the alert
+  records behind it.
+- [docs/index.html](docs/index.html) is a short page explaining the system for someone who
+  has not read the code.
+- The write-up starts at [Write-up](#write-up) below.
 
 ## Setup
 
@@ -64,12 +73,15 @@ uv run python agent.py run --once --source demo
 # Live monitoring
 uv run python agent.py run
 
+# Pick a detector. Defaults to combined when GROQ_API_KEY is set, rules otherwise.
+uv run python agent.py run --detector rules
+
 # Verify your alert channel in isolation before trusting the agent
 uv run python agent.py test-alert
 
 uv run python agent.py health      # heartbeat state and active alarms
 uv run python agent.py stats       # store counts
-uv run pytest -q                   # full suite, offline
+uv run pytest -q                   # full suite, offline, nothing touches the network
 ```
 
 ### Dashboard
@@ -78,14 +90,17 @@ uv run pytest -q                   # full suite, offline
 uv run python scripts/dashboard.py --port 8000 --db data/agent.db
 ```
 
-A control room for the agent, not just a read only view. One page, built on `http.server`
-with no new dependency: a status hero (running, stopped or degraded, with live figures and
-a countdown to the next poll), start and stop buttons, poll interval presets with a plain
-English guidance line computed from the value you pick, a backfill trigger with a time and
-page estimate before you run it, a fetched to alerted pipeline funnel, a ticker filterable
-mentions feed, health and latency (reusing `latency_report.py`'s own maths), precision,
-recall and F1 read from `data/eval/metrics.md` when it exists, and the ticker lexicon
-editor. The page renders once, then a small script polls `GET /api/state` every 10 seconds
+One page on `http.server`, no new dependency. It shows:
+
+- a status hero (running, stopped or degraded) with live figures and a countdown to the next poll
+- start and stop buttons
+- poll interval presets, each with a line explaining what that value costs
+- a backfill trigger, with a time and page estimate before you run it
+- a fetched to alerted pipeline funnel
+- a ticker filterable mentions feed
+- health and latency, reusing `latency_report.py`'s own maths
+- precision, recall and F1 read from `data/eval/metrics.md` when it exists
+- the ticker lexicon editor The page renders once, then a small script polls `GET /api/state` every 10 seconds
 and updates in place, so nothing you are mid way through typing gets wiped by a refresh.
 
 `is_running()` checks the recorded pid with `os.kill(pid, 0)` rather than trusting the pid
@@ -97,6 +112,8 @@ It is local only, binds to 127.0.0.1 by default, and has no authentication, so i
 never be exposed to a network.
 
 Reproducing the data and evaluation:
+
+### Reproducing the evaluation
 
 ```bash
 uv run python scripts/backfill.py --days 45 --delay 2.5 --out data/history.jsonl
@@ -117,7 +134,8 @@ All sampling is seeded, so reruns are byte identical.
 
 ```bash
 docker build -t tsalert .
-docker run --rm tsalert                                  # offline demo, no credentials
+docker run --rm tsalert                                  # offline demo, nothing persisted
+docker run --rm -v tsalert-data:/data tsalert            # same demo, state kept
 docker run --rm --env-file .env -v tsalert-data:/data tsalert run
 ```
 
@@ -142,7 +160,7 @@ found the working one by trying a few rather than understanding their rules.
 
 | Option | Verdict |
 | --- | --- |
-| Mastodon JSON + TLS impersonation | **Chosen.** Structured and incremental |
+| Mastodon JSON + TLS impersonation | **Chosen.** `min_id` returns only new posts, so polling is cheap and latency is bounded by the interval rather than by parsing. Reliable while the fingerprint holds, which is the catch |
 | `trumpstruth.org` RSS mirror | **Fallback.** Same status ids, so failover cannot double-alert |
 | Headless browser, third-party aggregators | Rejected. Slower and more brittle, no gain over JSON |
 
@@ -150,8 +168,8 @@ It is also the most fragile, depending on a Cloudflare setting I neither control
 warning about, which is why the mirror sits behind it.
 
 **Polling** floats 60 to 300 seconds plus jitter, so real delays land near 48 to 360. Quiet
-polls back off, any new post resets to base. Replaying the real history gives 305 requests a
-day against 1,440 for a flat 60 second poll.
+polls back off, any new post resets to base. Replaying the real posting history through it
+gives 316 requests a day against 1,440 for a flat 60 second poll.
 
 **Detection** pairs a rule baseline with an LLM arm. Each lexicon row rates its ticker's
 ambiguity and riskier ones need more context, because here *trade* and *economy* are ordinary
@@ -162,17 +180,18 @@ split, his habit of shouting in capitals turns ALL, BIG and NOW into noise.
 
 Three facts from the 1,260 post archive shaped everything. Zero cashtags appear, so `$DJT` is
 implemented but never exercised by real data. 472 posts, 37 percent, carry no text and are
-invisible to a text detector. And all 60 bare `DJT` tokens are his sign-off, none the ticker.
+invisible to a text detector. All 60 bare `DJT` tokens are his sign-off, none the ticker.
 
-Mentions are rare enough that a random 150 would turn up almost none, so the set uses three
+Mentions are rare enough that a random 150 would find almost none, so the set uses three
 groups: candidates (23, every post the rules flagged, labelled completely so precision is
 exact), random (102, reweighted by 3.62 to stand for the archive, which makes recall
 measurable), and traps (25, lookalikes a rule picked out, scored separately). Together they
 hold 15 real mentions.
 
 Precision is how many alerts were real, recall how many real mentions got caught, F1 balances
-the two. Ticker scores the same on whether the right company was named. Exact set counts how
-many of the 15 got their whole ticker list right.
+the two. The ticker columns use the same formulas but score whether the right company was named, not
+just whether the post was a mention. Exact set counts how many of the 15 got their whole
+ticker list right.
 
 | Arm | Class P / R / F1 | Ticker P / R / F1 | Exact set | Traps |
 | --- | --- | --- | --- | --- |
@@ -180,11 +199,13 @@ many of the 15 got their whole ticker list right.
 | llm | 1.000 / 1.000 / 1.000 | 1.000 / 0.967 / 0.983 | 14/15 | 25/25 |
 | **combined, ships** | 1.000 / 0.738 / 0.849 | 0.897 / 0.849 / 0.872 | 13/15 | 25/25 |
 
-Resampling the rule arm 2,000 times puts its true F1 between 0.558 and 0.968 at 95 percent
-confidence. Gating the LLM on rule candidates lets combined drop a false positive but never
-recover a miss, so it inherits 0.738 recall by construction. What it buys is precision. Both
-misses are known: S&P Global is outside the lexicon, and a bare link, since URLs are
-stripped.
+Resampling the rule arm 2,000 times puts its true F1 between 0.558 and 0.968. Gating the LLM
+on rule candidates lets combined drop a false positive but never recover a miss, so it
+inherits 0.738 recall by construction. What it buys is precision. Both
+misses are known: one post names S&P Global, which is outside the lexicon, and the other
+names a company only inside a URL, and URLs are stripped before matching. The two false alarms are a quote post whose sign-off leaked through the quoted
+text, and an election post, so the rule arm errs on the DJT signature it was built to
+suppress rather than on company names.
 
 **The LLM's 1.000 is not a measurement.** `gpt-oss-120b` proposed every label and a stronger
 model adjudicated all 150, changing 8 without flipping a verdict, so the labels match that
@@ -194,25 +215,26 @@ makes them consistent rather than independent, since every step is a language mo
 `qwen3.6-27b`.
 
 **Latency** over a 90 poll run: 26, 79 and 154 seconds from a post appearing to the agent
-fetching it, then 7.4 ms to decide and 0.3 ms to send. The poll interval is the whole budget,
+fetching it, then 7.4 ms to decide and 0.3 ms to hand off to the console channel. Telegram
+adds a network round trip on top of that. The poll interval is the whole budget,
 which makes backoff a latency decision as much as a politeness one. A fourth sample at 824
 seconds is dropped as a cold start, leaving three, because no other stock post arrived during
-the run.
+the run. These came from a live run, so `latency_report.py` prints zeros on a fresh clone until you
+run the agent yourself. That database is not committed.
 
 ## 3. Robustness and ethics
 
-The failure table above lists what breaks and what catches it. The one worth naming is the
-quiet one: a 404 is obvious, but a 200 with a changed shape is not, and the parser just
-returns empty while everything looks fine. Hence an unparseable page raising rather than
-returning nothing, and a heartbeat watching for polls that succeed while nothing arrives.
+The failure table above lists what breaks and what catches it. The rows worth calling out are
+the quiet ones: a changed schema and a stalled poll both look like nothing is wrong, which is
+why both raise loudly rather than returning empty.
 
 Politeness is in code rather than in a comment promising it: a 2.5 second floor between
 requests, an hourly cap that refuses past 600, `Retry-After` honoured, strictly sequential
 requests. The cap matters most, since backoff stays correct right until a loop bug turns it
 into a hammer.
 
-This reads public pages with no account and keeps only public post text. The mirror allows
-crawling; Truth Social publishes no `robots.txt`. I would not oversell that: automated access
+This reads public pages with no account and keeps only public post text. The mirror's `robots.txt` allows crawling;
+Truth Social publishes none at all, so there is no explicit permission either way. I would not oversell that: automated access
 likely conflicts with their terms anyway, and impersonating a browser fingerprint works
 around bot protection, which goes past reading a page. One request a minute seems
 proportionate for a prototype. For real use I would want a licensed feed.
@@ -221,21 +243,20 @@ proportionate for a prototype. For real use I would want a licensed feed.
 
 Media-only posts are invisible; OCR is the answer. The lexicon caps recall, since the labels
 contain `SPGI`, `V`, `TM` and `TMUS`, none among the 95 rows. Fifteen positives limit every
-interval here. And the labels are model generated, so the ML comparison is not trustworthy.
+interval above, the 0.558 to 0.968 range included. And the labels are model generated, so the
+rules against LLM comparison is not a trustworthy benchmark.
 
-**More accounts** is mostly scheduling now. Sources are per account, posts carry it, dedup
-keys on the status id, and the polling cursor is namespaced, which it was not until I ran two
-accounts against one database and watched the second overwrite the first. Namespacing then
-orphaned the cursor on the existing database and the agent quietly refetched three weeks, so
-it reads the old key once and carries it forward. What is left is the
-loop: a priority queue keyed on each account's posting rate, so a busy one polls every minute
-and a quiet one drifts to fifteen, under one shared budget.
+**More accounts** is mostly scheduling now. Sources are already per account, each post records
+which account it came from, and dedup keys on the status id. The cursor did need changing: it
+was one global value, so a second account overwrote the first's. It is namespaced now. What is
+left is the loop, a priority queue keyed on each account's posting rate so a busy one polls
+every minute and a quiet one drifts to fifteen, under one shared budget.
 
 **Evaluating in production** without labeling everything: run both arms over live traffic and
 hand-label only where they disagree, which puts effort on the decision boundary and turns each
-delivered alert into a labeling chance, since a thumbs up or down in Telegram costs nothing.
-Alongside that, watch input drift rather than accuracy. Candidate rate and ticker distribution
-need no labels, and a sharp move in either is the first hint something changed.
+delivered alert into a labeling chance, since a thumbs up in Telegram costs nothing. Also watch
+input drift rather than accuracy. Candidate rate and ticker distribution need no labels, and a
+sharp move in either is the first hint something changed.
 
 ## Repository layout
 
@@ -253,13 +274,6 @@ src/tsalert/
 scripts/                  backfill, eval set construction, labeling, evaluation, latency,
                           dashboard (bonus: local read only http.server dashboard)
 data/                     the 45 day archive, the lexicon, the evaluation set
-tests/                    203 tests, offline, against recorded fixtures
+tests/                    217 tests, offline, against recorded fixtures
 ```
 
-## Tests
-
-```bash
-uv run pytest -q
-```
-
-Everything runs offline against recorded fixtures. No test touches the network.
