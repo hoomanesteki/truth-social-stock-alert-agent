@@ -47,6 +47,14 @@ class Config:
     groq_model: str = ""
     heartbeat_stale_minutes: int = 15
     no_posts_alarm_hours: int = 12
+    # Nothing older than this ever alerts, whatever the eligibility flag on
+    # the row says. A stock alert about a post from last month is not news,
+    # and this is the backstop for the ways old posts get into the store:
+    # a database written before backfill learned to mark its rows, an
+    # import, a restore. A day is generous for a feed meant to alert inside
+    # a minute, and still wide enough that the agent can be down overnight
+    # and catch up properly when it returns.
+    max_alert_age_hours: int = 24
 
     @classmethod
     def from_env(cls, env_file: str | None = ".env") -> "Config":
@@ -69,4 +77,5 @@ class Config:
             groq_model=os.environ.get("GROQ_MODEL", d.groq_model),
             heartbeat_stale_minutes=_positive_int("HEARTBEAT_STALE_MINUTES", os.environ.get("HEARTBEAT_STALE_MINUTES"), d.heartbeat_stale_minutes),
             no_posts_alarm_hours=_positive_int("NO_POSTS_ALARM_HOURS", os.environ.get("NO_POSTS_ALARM_HOURS"), d.no_posts_alarm_hours),
+            max_alert_age_hours=_positive_int("MAX_ALERT_AGE_HOURS", os.environ.get("MAX_ALERT_AGE_HOURS"), d.max_alert_age_hours),
         )

@@ -43,6 +43,7 @@ Every failure below was tested by forcing it, not just handled in principle.
 | Telegram down | Console still delivers. One alert probes the channel, the rest of the poll skips it, and they queue for the next poll. Delivery is tracked per channel, so one channel being down cannot hold up another |
 | Process dies mid delivery | The alert is re-sent on the next poll. The claim is keyed on post and channel, so a restart cannot repeat what already completed. Delivery is at least once, not exactly once |
 | Process dies before detection | The next poll re-checks anything left undetected, so it is still caught |
+| A store full of old posts (a restore, an import, a backfill from before the eligibility flag) | Two gates, not one. Backfilled rows are marked ineligible, and on a live source nothing older than `MAX_ALERT_AGE_HOURS` alerts regardless of the flag. Found this the hard way: a database built before the flag existed re-announced six week old news a batch per poll |
 
 ## Demo and write-up
 

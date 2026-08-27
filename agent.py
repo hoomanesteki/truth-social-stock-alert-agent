@@ -222,6 +222,7 @@ def cmd_run(args: argparse.Namespace, config: Config) -> int:
             account=config.account,
             prime_without_alerting=not is_replay,
             time_latency=not is_replay,
+            max_alert_age_hours=None if is_replay else config.max_alert_age_hours,
         )
 
         print(f"Source: {source_name}")

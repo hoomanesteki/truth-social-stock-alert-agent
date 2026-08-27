@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import json
 from dataclasses import replace
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 from tsalert.alerts.dispatcher import AlertDispatcher
@@ -203,7 +203,8 @@ def make_detector() -> RuleDetector:
 
 
 def make_runner(source, dispatcher, store, sleep=no_sleep,
-                time_latency: bool = True) -> AgentRunner:
+                time_latency: bool = True,
+                max_alert_age_hours: int | None = None) -> AgentRunner:
     return AgentRunner(
         source=source,
         detector=make_detector(),
@@ -213,6 +214,7 @@ def make_runner(source, dispatcher, store, sleep=no_sleep,
         interval=AdaptiveInterval(),
         sleep=sleep,
         time_latency=time_latency,
+        max_alert_age_hours=max_alert_age_hours,
     )
 
 
@@ -597,3 +599,57 @@ def test_live_polling_still_records_latency(tmp_path):
     assert runner.poll_once() == len(DEMO_IDS)
     rows = store._conn.execute("SELECT COUNT(*) FROM latency").fetchone()[0]
     assert rows == len(DEMO_IDS)
+
+
+def test_stale_posts_do_not_alert_even_when_marked_eligible(tmp_path):
+    """The age gate is a backstop for a wrong eligibility flag.
+
+    This is not hypothetical. A store backfilled before backfill.py learned
+    to mark its rows leaves 1,260 archive posts all looking alertable, and
+    the undetected backlog pass then works through them a batch per poll,
+    announcing six week old news as if it had just been posted. The flag was
+    written wrong; the post's own timestamp was not.
+    """
+    store = make_store(tmp_path)
+    dispatcher = FakeDispatcher()
+    runner = make_runner(FixtureSource([DEMO_FIXTURE]), dispatcher, store,
+                         max_alert_age_hours=24)
+
+    runner.poll_once()
+
+    # The demo fixture is real archive posts, weeks old, and every one of
+    # them is stored alert_eligible by default.
+    eligible = store._conn.execute(
+        "SELECT COUNT(*) FROM posts WHERE COALESCE(alert_eligible,1)=1"
+    ).fetchone()[0]
+    assert eligible == len(DEMO_IDS)
+    assert dispatcher.dispatched == []
+
+
+def test_a_recent_post_still_alerts_with_the_gate_on(tmp_path):
+    """The gate must not become a way to drop live alerts."""
+    store = make_store(tmp_path)
+    dispatcher = FakeDispatcher()
+    runner = make_runner(FixtureSource([DEMO_FIXTURE]), dispatcher, store,
+                         max_alert_age_hours=24)
+
+    fresh = datetime.now(timezone.utc) - timedelta(minutes=5)
+    source = FixtureSource([DEMO_FIXTURE])
+    posts = [replace(p, created_at=fresh) for p in source.fetch_latest(since_id=None)]
+    runner.source = _StaticSource(posts)
+
+    runner.poll_once()
+    assert len(dispatcher.dispatched) > 0
+
+
+class _StaticSource:
+    """Returns a fixed list once, then nothing."""
+
+    name = "static"
+
+    def __init__(self, posts):
+        self._posts = posts
+
+    def fetch_latest(self, since_id=None):
+        posts, self._posts = self._posts, []
+        return posts

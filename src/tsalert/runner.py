@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import logging
 import time
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Any, Callable
 
 from tsalert.alerts.dispatcher import AlertDispatcher
@@ -48,6 +48,7 @@ class AgentRunner:
         account: str = "",
         prime_without_alerting: bool = False,
         time_latency: bool = True,
+        max_alert_age_hours: int | None = None,
     ) -> None:
         self.account = account
         # Off for the replay sources. Their posts carry the timestamps they
@@ -56,6 +57,17 @@ class AgentRunner:
         # then the latency report saw a p50 of about two days and would
         # reasonably conclude the agent was broken.
         self.time_latency = time_latency
+        # Age backstop for alerting, None to disable. Eligibility is a flag
+        # on the row, and a flag is only as good as whatever wrote it: a
+        # store built before backfill learned to mark its rows leaves the
+        # whole archive looking alertable, and the backlog pass then works
+        # through it a batch at a time, announcing month old news as if it
+        # just happened. The post's own timestamp cannot be got wrong the
+        # same way. Off by default and off for the replay sources, whose
+        # whole purpose is to alert on posts that are deliberately old.
+        self.max_alert_age = (
+            timedelta(hours=max_alert_age_hours) if max_alert_age_hours else None
+        )
         # A brand new database has an empty alerts table, so every post the
         # first poll happens to return looks unsent and gets delivered. That
         # is how you end up messaging someone twenty times for posts they
@@ -193,6 +205,18 @@ class AgentRunner:
         for alarm in self.monitor.check():
             self.dispatcher.dispatch_ops(alarm.name, alarm.detail)
 
+    def _worth_alerting(self, post: Post) -> bool:
+        """Both gates an alert has to pass: eligible, and recent enough."""
+        if not self.store.is_alert_eligible(post.id):
+            return False
+        if self.max_alert_age is None:
+            return True
+        age = datetime.now(timezone.utc) - post.created_at
+        if age > self.max_alert_age:
+            logger.info("not alerting on %s, it is %s old", post.id, age)
+            return False
+        return True
+
     def _detect_and_dispatch(self, post: Post, *, time_it: bool = True,
                              alert: bool = True) -> None:
         """Run one post through the detector, persist it, dispatch if it hits.
@@ -239,7 +263,7 @@ class AgentRunner:
         # Eligibility is checked here rather than at the call sites because
         # the undetected backlog path also lands in this method, and that is
         # how backfilled history used to reach the dispatcher.
-        if detection.is_stock_related and alert and self.store.is_alert_eligible(post.id):
+        if detection.is_stock_related and alert and self._worth_alerting(post):
             # The dispatcher stamps latency too, on delivery, so it needs the
             # same replay gate. Otherwise the one post that alerts still
             # lands an archive-age row in the table.
