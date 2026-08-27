@@ -47,8 +47,15 @@ class AgentRunner:
         sleep: Callable[[float], None] = time.sleep,
         account: str = "",
         prime_without_alerting: bool = False,
+        time_latency: bool = True,
     ) -> None:
         self.account = account
+        # Off for the replay sources. Their posts carry the timestamps they
+        # really had, days or weeks back, so stamping publish to fetch on
+        # them records the age of the archive. Anyone who ran the demo and
+        # then the latency report saw a p50 of about two days and would
+        # reasonably conclude the agent was broken.
+        self.time_latency = time_latency
         # A brand new database has an empty alerts table, so every post the
         # first poll happens to return looks unsent and gets delivered. That
         # is how you end up messaging someone twenty times for posts they
@@ -134,7 +141,12 @@ class AgentRunner:
                 if not is_new:
                     continue
 
-                self._detect_and_dispatch(post, alert=not priming)
+                # Priming is the deliberate skip past history on first
+                # start. Those posts are days or weeks old, so timing them
+                # measures the age of the archive, not how fast we are, and
+                # publish to fetch is the one stage the latency report leads
+                # with. The backlog pass below already learned this lesson.
+                self._detect_and_dispatch(post, alert=not priming, time_it=not priming)
                 new_count += 1
         except (ValueError, TypeError) as exc:
             # An unexpected id shape or malformed post must never kill the
@@ -189,19 +201,35 @@ class AgentRunner:
         above, so a post recovered after a crash goes through exactly the
         same detect/save/dispatch steps a freshly fetched one does.
 
-        time_it is False for the backlog pass. Those posts were ingested by an
-        earlier run or by the backfill script, so measuring publish to fetch
-        on them reports how old the archive is, and a handful of month old
-        posts drown every real reading in the table.
+        time_it is False for the backlog pass and for priming. Those posts
+        were ingested by an earlier run, by the backfill script, or are the
+        history we deliberately skip past on first start, so measuring
+        publish to fetch on them reports how old the archive is, and a
+        handful of month old posts drown every real reading in the table.
         """
-        detection = self.detector.detect(post.detection_text, post.id)
+        try:
+            detection = self.detector.detect(post.detection_text, post.id)
+        except Exception as exc:
+            # One post must not be able to stop the agent. --detector llm
+            # builds a bare LlmDetector, which propagates GroqError on
+            # purpose so CombinedDetector can decide what to do about it,
+            # and with nothing catching it here a single bad Groq response
+            # killed the run. Worse, the post was already stored with
+            # detected_at NULL, so the undetected backlog pass replayed it
+            # on the next start and died in the same place, before fetching
+            # anything. Leaving it undetected is the right outcome: the
+            # backlog pass retries it, bounded per poll, and a detector that
+            # recovers picks it up with nothing lost.
+            logger.error("detector failed on post %s, leaving it for the backlog: %s",
+                         post.id, exc)
+            return
         self.store.save_detection(detection)
         # Latency gets stamped on every post, including the ones that never
         # alert. Stock mentions run around two percent, so building a sample
         # only from delivered alerts would take days. Publish to fetch is the
         # stage bounded by the poll interval and it dominates the total, so
         # that is the number worth having.
-        if time_it:
+        if time_it and self.time_latency:
             self.store.record_latency(
                 post.id,
                 published_at=post.created_at.isoformat(),
@@ -212,7 +240,10 @@ class AgentRunner:
         # the undetected backlog path also lands in this method, and that is
         # how backfilled history used to reach the dispatcher.
         if detection.is_stock_related and alert and self.store.is_alert_eligible(post.id):
-            self.dispatcher.dispatch(post, detection)
+            # The dispatcher stamps latency too, on delivery, so it needs the
+            # same replay gate. Otherwise the one post that alerts still
+            # lands an archive-age row in the table.
+            self.dispatcher.dispatch(post, detection, time_it=time_it and self.time_latency)
             self.alerts_sent += 1
 
     def run(self, max_iterations: int | None = None) -> None:

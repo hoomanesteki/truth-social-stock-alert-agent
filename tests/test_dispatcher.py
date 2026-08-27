@@ -586,3 +586,36 @@ def test_an_outage_does_not_burn_the_retry_budget(tmp_path):
         results = dispatcher.retry_failed()
         assert len(results) == 3
         assert all(r.ok for r in results)
+
+
+def test_probing_a_known_down_channel_costs_one_attempt(tmp_path):
+    """Re-learning a channel is down should not cost the full budget.
+
+    The probe runs at the top of every poll, before the source is fetched,
+    so whatever it costs delays every alert in that poll. Four attempts
+    against a blocked host is roughly 85 seconds, which is longer than the
+    poll interval itself. One attempt is enough to notice the channel is
+    back, and the full budget returns as soon as it is.
+    """
+    telegram = DownChannel("telegram")
+    post = make_post("1")
+
+    with Store(tmp_path / "probe.db") as store:
+        store.upsert_post(post)
+        store.save_detection(make_detection(post.id))
+        dispatcher = AlertDispatcher([telegram], store, max_attempts=4, sleep=no_sleep)
+
+        dispatcher.dispatch(post, make_detection(post.id))
+        assert len(telegram.sent) == 4  # first time, full budget
+
+        for _ in range(3):
+            before = len(telegram.sent)
+            dispatcher.retry_failed()
+            assert len(telegram.sent) - before == 1  # one attempt per poll
+
+        telegram.up = True
+        before = len(telegram.sent)
+        results = dispatcher.retry_failed()
+        assert len(telegram.sent) - before == 1
+        assert results[0].ok is True
+        assert "telegram" not in dispatcher._known_down

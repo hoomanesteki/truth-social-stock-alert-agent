@@ -101,12 +101,17 @@ class TruthSocialApiSource:
         self._check_rate_limit()
         self._throttle()
         url = self._URL_TEMPLATE.format(account_id=self.account_id)
+        # Counted before the call, not after. A request that fails still left
+        # this machine and still reached their server, so it still costs them
+        # something. Recording only successes meant the hourly cap did not
+        # apply to the one case it exists for: something going wrong and
+        # retrying in a loop.
+        self._request_times.append(self._clock())
         try:
             response = self._transport(url, params)
         except Exception as exc:
             self._last_error = str(exc)
             raise TransientSourceError(f"transport error: {exc}") from exc
-        self._request_times.append(self._clock())
         try:
             return self._handle_response(response)
         except SourceError as exc:

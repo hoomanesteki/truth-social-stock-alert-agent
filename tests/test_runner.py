@@ -61,7 +61,11 @@ class FakeDispatcher:
         self.recover_undelivered_calls += 1
         return []
 
-    def dispatch(self, post, detection):
+    def dispatch(self, post, detection, time_it: bool = True):
+        # Mirrors AlertDispatcher.dispatch. The double silently diverging
+        # from the real signature is worth avoiding: a TypeError here is
+        # swallowed by poll_once's malformed-data handler, so the poll
+        # returns 0 and the test fails somewhere unrelated.
         self.dispatched.append((post, detection))
         return []
 
@@ -198,7 +202,8 @@ def make_detector() -> RuleDetector:
     return RuleDetector(Lexicon.load(LEXICON_PATH))
 
 
-def make_runner(source, dispatcher, store, sleep=no_sleep) -> AgentRunner:
+def make_runner(source, dispatcher, store, sleep=no_sleep,
+                time_latency: bool = True) -> AgentRunner:
     return AgentRunner(
         source=source,
         detector=make_detector(),
@@ -207,6 +212,7 @@ def make_runner(source, dispatcher, store, sleep=no_sleep) -> AgentRunner:
         monitor=HealthMonitor(store),
         interval=AdaptiveInterval(),
         sleep=sleep,
+        time_latency=time_latency,
     )
 
 
@@ -563,3 +569,31 @@ def test_backfilled_history_never_alerts(tmp_path):
 
     store.close()
     assert dispatcher.dispatched == []
+
+
+def test_replaying_recorded_posts_does_not_record_latency(tmp_path):
+    """Replay sources must not write to the latency table.
+
+    Their posts carry the timestamps they really had, days or weeks in the
+    past, so publish to fetch on them measures the age of the archive. Anyone
+    who ran the demo and then latency_report.py saw a p50 of about two days,
+    which reads as a broken agent rather than a replayed one.
+    """
+    store = make_store(tmp_path)
+    source = FixtureSource([DEMO_FIXTURE])
+    runner = make_runner(source, FakeDispatcher(), store, time_latency=False)
+
+    assert runner.poll_once() == len(DEMO_IDS)
+    rows = store._conn.execute("SELECT COUNT(*) FROM latency").fetchone()[0]
+    assert rows == 0
+
+
+def test_live_polling_still_records_latency(tmp_path):
+    """The gate is for replays only, not a way to lose the real measurement."""
+    store = make_store(tmp_path)
+    source = FixtureSource([DEMO_FIXTURE])
+    runner = make_runner(source, FakeDispatcher(), store)
+
+    assert runner.poll_once() == len(DEMO_IDS)
+    rows = store._conn.execute("SELECT COUNT(*) FROM latency").fetchone()[0]
+    assert rows == len(DEMO_IDS)

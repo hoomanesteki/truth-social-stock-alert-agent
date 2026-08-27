@@ -1,12 +1,52 @@
 from __future__ import annotations
 
+import logging
+import math
 import random
 import time
 from typing import Callable, TypeVar
 
 from tsalert.sources.base import PermanentSourceError, TransientSourceError
 
+logger = logging.getLogger(__name__)
+
 T = TypeVar("T")
+
+# Longest we will ever sit inside a single retry waiting on a server's
+# Retry-After. Real rate limits ask for seconds or low minutes; anything past
+# this is either a mistake or a server telling us to go away for the day, and
+# neither is worth blocking a poll for.
+MAX_RETRY_AFTER_SECONDS = 300.0
+
+
+def sanitize_retry_after(value: object, ceiling: float = MAX_RETRY_AFTER_SECONDS) -> float | None:
+    """Turn a server-supplied Retry-After into a delay that is safe to sleep on.
+
+    The value comes off the wire, so it is whatever the other end felt like
+    sending. Passing it to time.sleep unchecked is what makes a hostile or
+    broken header dangerous: a negative raises ValueError out of the retry
+    loop and kills the poll, inf raises OverflowError, nan compares false
+    against every bound and sleeps forever, and a plain large number hangs
+    the agent for as long as it says.
+
+    None means the value is unusable and the caller should fall back to its
+    own exponential backoff. Values above the ceiling are clamped rather than
+    dropped: the server did ask us to wait, and waiting the ceiling is both
+    polite and bounded.
+    """
+    if value is None:
+        return None
+    try:
+        delay = float(value)
+    except (TypeError, ValueError):
+        return None
+    if math.isnan(delay) or delay < 0:
+        logger.warning("ignoring nonsense Retry-After (%r), backing off normally", value)
+        return None
+    if delay > ceiling:
+        logger.warning("Retry-After asked for %.0fs, waiting %.0fs instead", delay, ceiling)
+        return ceiling
+    return delay
 
 
 def with_retries(
@@ -35,9 +75,9 @@ def with_retries(
             last_exc = exc
             if attempt >= attempts:
                 raise
-            retry_after = getattr(exc, "retry_after", None)
+            retry_after = sanitize_retry_after(getattr(exc, "retry_after", None))
             if retry_after is not None:
-                delay = float(retry_after)
+                delay = retry_after
             else:
                 cap = min(max_delay, base_delay * (2 ** (attempt - 1)))
                 # Full jitter (AWS backoff-and-jitter): pick uniformly under the
@@ -54,7 +94,9 @@ class AdaptiveInterval:
     """Grows the poll interval when nothing is arriving, snaps back when it is.
 
     His posting is bursty, long gaps then several in a row, so stretching
-    the interval during the gaps drops request volume by about two thirds.
+    the interval during the gaps roughly halves request volume: replaying the
+    real history at the deployed 30 to 60 second range gives about 1,450
+    requests a day against 2,880 for polling flat out every 30 seconds.
     Latency barely moves, because the first post of a burst pulls the
     interval straight back to base.
     """

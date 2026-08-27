@@ -27,6 +27,15 @@ from tsalert.sources.parse import html_to_text
 
 logger = logging.getLogger(__name__)
 
+
+class MalformedItemError(Exception):
+    """One RSS item could not be read. Deliberately not a SourceError.
+
+    A SourceError describes the feed as a whole and reaches the failover
+    logic. A single bad item says nothing about the feed, so it is counted
+    and skipped like the primary source does with a bad status.
+    """
+
 Transport = Callable[[str, dict], Any]
 
 _TRUTH_NS = {"truth": "https://truthsocial.com/ns"}
@@ -121,10 +130,29 @@ class TrumpsTruthRssSource:
         items = root.findall("./channel/item")
         fetched_at = datetime.now(timezone.utc)
         posts = []
+        malformed = 0
         for item in items:
-            post = self._parse_item(item, fetched_at)
+            try:
+                post = self._parse_item(item, fetched_at)
+            except MalformedItemError:
+                # One bad item is not a broken feed. This used to raise
+                # PermanentSourceError straight out of the loop, so a single
+                # unparseable pubDate threw away every good post beside it,
+                # and because the error was permanent neither with_retries
+                # nor the failover could route around it: the fallback
+                # returned nothing, every poll, for as long as that item
+                # stayed in the feed.
+                malformed += 1
+                continue
             if post is not None:
                 posts.append(post)
+        # Same majority rule the primary uses. A couple of odd items are
+        # normal, most of them failing is the feed changing shape.
+        if items and malformed / len(items) > 0.5:
+            raise PermanentSourceError(
+                f"{malformed}/{len(items)} RSS items failed to parse, "
+                "likely a feed format change"
+            )
         return posts
 
     def _parse_item(self, item: ET.Element, fetched_at: datetime) -> Post | None:
@@ -158,11 +186,11 @@ class TrumpsTruthRssSource:
     @staticmethod
     def _parse_pub_date(value: str | None) -> datetime:
         if not value:
-            raise PermanentSourceError("RSS item missing pubDate")
+            raise MalformedItemError("RSS item missing pubDate")
         try:
             dt = parsedate_to_datetime(value)
         except (TypeError, ValueError) as exc:
-            raise PermanentSourceError(f"unparseable pubDate: {value!r}") from exc
+            raise MalformedItemError(f"unparseable pubDate: {value!r}") from exc
         if dt.tzinfo is None:
             dt = dt.replace(tzinfo=timezone.utc)
         return dt.astimezone(timezone.utc)

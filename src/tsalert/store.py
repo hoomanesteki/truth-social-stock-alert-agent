@@ -229,7 +229,7 @@ class Store:
             self._conn.execute(f"UPDATE latency SET {columns} WHERE post_id=?", values)
         self._conn.commit()
 
-    def retryable_alerts(self, max_cycles: int) -> list[tuple[str, str]]:
+    def retryable_alerts(self, max_cycles: int, limit: int = 50) -> list[tuple[str, str]]:
         """Alerts worth retrying, as (post_id, channel).
 
         Covers both 'failed' (every attempt in a dispatch() call was used up
@@ -242,17 +242,27 @@ class Store:
 
         Status alone excludes 'permanent_failure': a 4xx, bad token or bad
         chat id cannot succeed by retrying, so those rows are never selected
-        here, however many cycles pass. cycles is the lifetime retry budget,
-        separate from max_attempts (the per-call send budget inside a single
-        dispatch or retry_failed attempt): it only grows once per
-        retry_failed pass, so a channel outage that burns its whole
-        per-call attempts budget still gets picked up again here on the next
-        pass, until max_cycles passes have been spent on it.
+        here, however many cycles pass.
+
+        cycles is the lifetime retry budget, separate from max_attempts (the
+        per-call send budget). In practice it now bounds very little: the
+        dispatcher does not spend a cycle on a failure that took the whole
+        channel down, because that failure says nothing about the individual
+        alert. A channel that stays down therefore keeps its queue rather
+        than working through max_cycles and discarding it, which is the right
+        trade for an alerting system but leaves the queue bounded by nothing.
+
+        That is what limit is for. Oldest first, so the queue drains in the
+        order the alerts happened and one poll cannot be swallowed by a long
+        backlog. The depth itself shows up in `agent.py stats` as
+        alerts_queued, since a backlog nothing reports is a backlog nobody
+        notices.
         """
         rows = self._conn.execute(
             "SELECT post_id, channel FROM alerts "
-            "WHERE status IN ('failed', 'pending') AND cycles < ?",
-            (max_cycles,),
+            "WHERE status IN ('failed', 'pending') AND cycles < ? "
+            "ORDER BY first_attempt_at ASC LIMIT ?",
+            (max_cycles, limit),
         ).fetchall()
         return [(row["post_id"], row["channel"]) for row in rows]
 

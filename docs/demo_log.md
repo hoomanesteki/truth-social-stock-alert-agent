@@ -57,6 +57,9 @@ Same command, same database. Nothing is re-alerted.
 
 ```
 $ uv run python agent.py run --once --source demo
+Source: demo
+Detector: rules
+Active channels: console
 poll 1: 0 new post(s), 0 alert(s) sent
 stopped after 1 poll(s), 0 new post(s), 0 alert(s) sent
 ```
@@ -69,13 +72,17 @@ is claimed separately, so one failing cannot suppress the other.
 ```
 $ uv run python agent.py test-alert
 Active channels: console, telegram
+OPS ALARM: test_alert
+This is a test alert sent from the command line.
+time: 2026-08-27 23:36 UTC
   console: delivered
   telegram: delivered
 
 $ uv run python agent.py run --once --source demo
 poll 1: 8 new post(s), 4 alert(s) sent
 
-$ sqlite3 agent.db "select channel, post_id, status, attempts from alerts"
+$ sqlite3 agent.db \
+    "select channel, post_id, status, attempts from alerts order by channel, post_id"
 console|116994500400281844|delivered|1
 console|117031897808226413|delivered|1
 console|117074526504264990|delivered|1
@@ -86,4 +93,9 @@ telegram|117074526504264990|delivered|1
 telegram|117085013643913800|delivered|1
 ```
 
-Eight records, four posts across two channels, all delivered on the first attempt.
+Eight records, four posts across two channels, all delivered on the first attempt. The rows are
+sorted for reading; on disk they interleave, because a post is claimed once per channel as it is
+dispatched.
+
+This section needs a network that allows Telegram. Mine blocks it, which is what turned up the
+outage bug described in the write-up, so the run above was captured where the API was reachable.

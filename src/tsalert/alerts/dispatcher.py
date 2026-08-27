@@ -9,6 +9,7 @@ from typing import Any, Callable
 
 from tsalert.alerts.base import AlertChannel, DeliveryResult, format_alert, format_ops_alert
 from tsalert.models import Detection, Post, TickerMention
+from tsalert.reliability import sanitize_retry_after
 from tsalert.sources.base import PermanentSourceError, TransientSourceError
 from tsalert.store import Store
 
@@ -42,6 +43,12 @@ class AlertDispatcher:
         # gets over its lifetime. Conflating the two is what let a permanent
         # failure keep getting retried and a transient one stop being retried
         # the moment one dispatch call used up its per-call budget.
+        #
+        # max_cycles is close to dormant now: a failure that takes the whole
+        # channel down does not spend one, and that covers nearly every
+        # transient failure that actually happens. Alerts queue through an
+        # outage instead of being discarded by it. retryable_alerts' limit is
+        # what bounds the work per poll.
         self.max_attempts = max_attempts
         self.max_cycles = max_cycles
         self.sentiment_scorer = sentiment_scorer
@@ -53,6 +60,9 @@ class AlertDispatcher:
         # top of retry_failed, which is the first thing every poll does, so
         # each poll gives a down channel exactly one probe.
         self._down_channels: set[str] = set()
+        # Survives that clear, so the probe knows the channel was down last
+        # time and costs one attempt instead of the full budget.
+        self._known_down: set[str] = set()
 
     def dispatch(self, post: Post, detection: Detection,
                  time_it: bool = True) -> list[DeliveryResult]:
@@ -130,6 +140,11 @@ class AlertDispatcher:
             if loaded is None:
                 continue
             post, detection = loaded
+            if channel.name in self._down_channels:
+                # Checked before _format on purpose: formatting calls the
+                # sentiment model, and paying a round trip to render an alert
+                # we are about to skip is pure waste once a channel is down.
+                continue
             text = self._format(post, detection)
             detected_at = datetime.now(timezone.utc)
             results.append(
@@ -277,7 +292,10 @@ class AlertDispatcher:
         every future retry by its status.
         """
         if ok:
+            if name in self._known_down:
+                logger.info("channel %s is back", name)
             self._down_channels.discard(name)
+            self._known_down.discard(name)
             return
         if permanent:
             return
@@ -286,6 +304,7 @@ class AlertDispatcher:
                 "channel %s failed every attempt, skipping it for the rest of this poll", name
             )
         self._down_channels.add(name)
+        self._known_down.add(name)
 
     def _send_with_retries(self, channel: AlertChannel, text: str) -> tuple[bool, int, str, bool]:
         """Send with in-call backoff. Returns (ok, attempts, error, permanent).
@@ -293,9 +312,16 @@ class AlertDispatcher:
         permanent is True only when the loop ended on a PermanentSourceError,
         which the caller uses to record a status that retry_failed will never
         pick back up, since retrying a 4xx cannot ever succeed.
+
+        A channel already known to be down gets one attempt, not the full
+        budget. Spending four timeouts to re-learn what the last poll
+        established costs about 85 seconds against a blocked host, and it is
+        spent before the poll fetches anything, so it delays every alert in
+        that poll. One attempt is enough to notice the channel is back.
         """
         error = ""
-        for attempt in range(1, self.max_attempts + 1):
+        budget = 1 if channel.name in self._known_down else self.max_attempts
+        for attempt in range(1, budget + 1):
             try:
                 channel.send(text)
                 return True, attempt, "", False
@@ -303,11 +329,11 @@ class AlertDispatcher:
                 return False, attempt, str(exc), True
             except TransientSourceError as exc:
                 error = str(exc)
-                if attempt >= self.max_attempts:
+                if attempt >= budget:
                     return False, attempt, error, False
-                retry_after = getattr(exc, "retry_after", None)
+                retry_after = sanitize_retry_after(getattr(exc, "retry_after", None))
                 if retry_after is not None:
-                    delay = float(retry_after)
+                    delay = retry_after
                 else:
                     cap = min(_MAX_BACKOFF_SECONDS, self.base_delay * (2 ** (attempt - 1)))
                     delay = self._rng.uniform(cap * _BACKOFF_JITTER, cap)

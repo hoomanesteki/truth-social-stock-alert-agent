@@ -66,7 +66,16 @@ class HealthMonitor:
         if new_posts > 0:
             self.store.set_state(_LAST_NEW_POST_KEY, now.isoformat())
 
-    def check(self) -> list[HealthAlarm]:
+    def check(self, record: bool = True) -> list[HealthAlarm]:
+        """Alarms that should fire now, suppressing ones raised recently.
+
+        record=False makes the call read only. Suppression works by writing
+        a "fired at" timestamp per alarm, so anything that calls check()
+        merely to display the result steals the running agent's next alarm:
+        the CLI marks it fired, the agent's own check a moment later sees a
+        recent timestamp and stays silent for min_repeat_minutes. Running
+        the diagnostic was enough to suppress the thing it was diagnosing.
+        """
         now = self._clock()
         alarms: list[HealthAlarm] = []
 
@@ -111,7 +120,7 @@ class HealthMonitor:
                 )
             )
 
-        return [a for a in alarms if self._should_fire(a.name, now)]
+        return [a for a in alarms if self._should_fire(a.name, now, record=record)]
 
     def status(self) -> dict[str, str | int | None]:
         """Raw state for display purposes, outside the interface contract above."""
@@ -122,12 +131,13 @@ class HealthMonitor:
             "consecutive_errors": self._get_int(_CONSECUTIVE_ERRORS_KEY),
         }
 
-    def _should_fire(self, alarm_name: str, now: datetime) -> bool:
+    def _should_fire(self, alarm_name: str, now: datetime, record: bool = True) -> bool:
         key = _ALARM_FIRED_PREFIX + alarm_name
         last_fired = self._get_datetime(key)
         if last_fired is not None and now - last_fired < timedelta(minutes=self.min_repeat_minutes):
             return False
-        self.store.set_state(key, now.isoformat())
+        if record:
+            self.store.set_state(key, now.isoformat())
         return True
 
     def _get_datetime(self, key: str) -> datetime | None:

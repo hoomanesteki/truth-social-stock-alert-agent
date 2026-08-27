@@ -45,10 +45,11 @@ _FIXTURE_PATHS = [
     _REPO_ROOT / "tests" / "fixtures" / "statuses_page1.json",
     _REPO_ROOT / "tests" / "fixtures" / "statuses_page2.json",
 ]
-# The recorded pages above happen to contain no stock mentions, so they show the
-# pipeline running but never exercise delivery. The demo file is a set of real
-# archive posts that do mention companies, which makes an end to end alert
-# demonstrable with no network and no credentials.
+# The recorded pages above hold one stock mention, an S&P Global post that only
+# started matching once the lookup table grew to cover the S&P 500. One alert out
+# of twenty posts is thin for a demo, so the demo file is a denser set of real
+# archive posts, four mentions and four lookalikes, which shows both halves of
+# the decision with no network and no credentials.
 _DEMO_PATHS = [_REPO_ROOT / "tests" / "fixtures" / "demo_statuses.json"]
 
 _REDACTED_FIELDS = {"telegram_bot_token", "groq_api_key"}
@@ -220,6 +221,7 @@ def cmd_run(args: argparse.Namespace, config: Config) -> int:
             source, detector, dispatcher, store, monitor, interval,
             account=config.account,
             prime_without_alerting=not is_replay,
+            time_latency=not is_replay,
         )
 
         print(f"Source: {source_name}")
@@ -259,7 +261,11 @@ def cmd_health(args: argparse.Namespace, config: Config) -> int:
         for key, value in status.items():
             print(f"  {key}: {value}")
 
-        alarms = monitor.check()
+        # Read only: this command shares a database with the running agent,
+        # and check() writes the suppression timestamps. Recording here would
+        # mean running `health` silenced the agent's own next alarm for an
+        # hour.
+        alarms = monitor.check(record=False)
         if not alarms:
             print("No active alarms.")
         else:

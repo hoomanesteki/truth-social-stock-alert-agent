@@ -183,10 +183,10 @@ from trial, not from understanding.
 | Headless browser, aggregators | Rejected. Slower and more brittle, no gain over JSON |
 
 It is also the most fragile, resting on a Cloudflare setting I neither control nor get warned
-about, which is why the mirror sits behind it.
+about, hence the mirror behind it.
 
 **Polling** floats 30 to 60 seconds. Replaying the real posting history gives a median wait of
-21 seconds and a worst case of 60. That costs volume: roughly 1,450 requests a day against 316
+21 seconds and a worst case of 71, since the jitter can overshoot the cap. That costs volume: roughly 1,450 requests a day against 316
 for the 60 to 300 range I started with. Latency won, and the throttle and hourly cap still
 bound the worst case.
 
@@ -198,8 +198,8 @@ capitals turn ALL and NOW into noise, and so do names like Ball and Progressive.
 
 ## 2. Results
 
-Three facts from the 1,260 post archive shaped everything. Zero cashtags appear, so `$DJT` is
-implemented but never exercised. 472 posts, 37 percent, carry no text. And all 60 bare `DJT`
+Three facts from the 1,260 post archive shaped everything. No cashtags at all, so `$DJT` is
+implemented but never exercised. 472 posts, 37 percent, carry no text. And all 61 bare `DJT`
 tokens are his sign-off.
 
 Mentions are rare enough that a random 150 would find almost none, so the set is stratified:
@@ -225,28 +225,27 @@ wins the yes/no call and loses on naming the companies: 8 of 15 exact sets again
 candidates means combined can drop a false positive but never recover a miss, so it inherits
 the rules' recall and ticker accuracy while keeping the LLM's precision.
 
-**The labels, and the trade-off.** Models pre-labelled and I read every row myself and made
-the final call. `gpt-oss-120b` proposed a label per post, a stronger model adjudicated all 150
-against a written rubric, and a third family relabelled blind and agreed on 149 binary
-verdicts. Labelling cold would have cost a day I did not have.
+**The labels, and the trade-off.** `gpt-oss-120b` proposed a label per post, a second model
+labelled the same posts independently and agreed with the finished set on 149 of 150, and I
+read all 150 and made the final call. Thirty of them I reviewed blind, without seeing either
+proposal, to check I was reading rather than rubber-stamping.
 
-The trade-off is independence. Model families share blind spots, so three agreeing is weaker
-evidence than three people agreeing, and reviewing a proposal anchors you in a way labelling
-cold does not. One thing is kept clean. The scored LLM arm is `qwen3.6-27b`, the model the
-agent runs, and it never touched the labels. An earlier version scored the labelling model and
-returned 1.000 on all 150 rows, measuring lineage rather than skill. `evaluate.py` now
-warns when an arm agrees with the labels completely. The rule arm predates the labelling
-entirely.
+The honest part is the override count: zero. Reviewing a proposal anchors you in a way
+labelling cold does not, and both models come from one family, so their agreeing is weaker
+evidence than two people agreeing. Read the numbers as resting on labels one person checked.
+One thing is kept clean. The scored LLM arm is `qwen3.6-27b`, the model the agent runs, and it
+never touched the labels. An earlier version scored the labelling model and returned 1.000 on all 150 rows,
+measuring lineage rather than skill. `evaluate.py` now warns when an arm agrees with the labels
+completely. The rule arm predates the labelling entirely.
 
 **Latency** over a 90 poll run: 26, 79 and 154 seconds from post to fetch, then 7.4 ms to
-decide and 0.3 ms to reach the console. Telegram adds a round trip I did not measure. The poll
-interval is the whole budget. Three samples only, a fourth at 824 seconds being a cold
-start.
+decide and 0.3 ms to reach the console. The poll interval is the whole budget. Three samples
+only, a fourth at 824 seconds being a cold start.
 
 ## 3. Robustness and ethics
 
 In the failure table above, the quiet ones matter most: a changed schema and a stalled poll
-both look like nothing is wrong, so both raise loudly.
+both look like nothing is wrong, so both raise.
 
 Delivery is at least once. A post and channel pair is claimed in sqlite before sending, so
 restarts and repeat polls cannot resend, but a crash between Telegram accepting and that write
@@ -255,8 +254,8 @@ will resend. Telegram has no idempotency key, and a duplicate beats a miss.
 The one bug I would not have found by reasoning came from my own network blocking Telegram.
 Nothing was lost, but every alert in the poll spent the full retry budget alone, four timeouts
 and backoff each, so a poll that should take a second took nearly six minutes. A channel that
-exhausts its whole budget is down, not flaky, so it is skipped for the rest of the poll and
-probed once on the next. Skipped alerts stay queued rather than counted as failures, since
+exhausts its budget is down, not flaky, so it is skipped for the rest of the poll and probed
+once, cheaply, on the next. Skipped alerts stay queued rather than counted as failures, since
 spending their budget on sends that never happened would discard them. After: 88 seconds.
 
 Politeness is in code, not a comment promising it: a 2.5 second floor between requests, an
@@ -264,7 +263,7 @@ hourly cap that refuses past 600, `Retry-After` honoured, requests strictly sequ
 matters most, since backoff stays correct right up until a loop bug turns it into a hammer.
 
 This reads public pages with no account and keeps only public post text. The mirror's
-`robots.txt` allows crawling; Truth Social publishes none. Automated access likely conflicts with
+`robots.txt` allows crawling, Truth Social publishes none. Automated access likely conflicts with
 their terms anyway, and impersonating a browser fingerprint works around bot protection, which
 goes past reading a page. Proportionate for a prototype at a request a minute; for real use I
 would want a licensed feed.
@@ -277,13 +276,13 @@ in the labels. Fifteen positives limit every interval above.
 
 **More accounts** is mostly scheduling now. Sources are per account, posts record which one,
 and dedup keys on the status id; the cursor needed fixing, since one global value let a second
-account overwrite the first. What is left is a priority queue keyed on each account's posting
-rate, so a busy one polls every minute and a quiet one drifts to fifteen.
+account overwrite the first. What is left is a priority queue keyed on posting rate, so a busy
+account polls every minute and a quiet one drifts to fifteen.
 
 **Evaluating in production** without labelling everything: run both arms over live traffic and
-hand-label only where they disagree, which puts the effort on the decision boundary. Watch
-input drift too. Candidate rate and ticker distribution need no labels, and a sharp move in
-either is the first hint something changed.
+hand-label only where they disagree, putting the effort on the decision boundary. Watch input
+drift too. Candidate rate and ticker distribution need no labels, and a sharp move in either is
+the first hint something changed.
 
 ## Repository layout
 
@@ -301,6 +300,6 @@ src/tsalert/
 scripts/                  backfill, eval set construction, labeling, evaluation, latency,
                           dashboard (bonus: local control panel on http.server)
 data/                     the 45 day archive, the lexicon, the evaluation set
-tests/                    235 tests, offline, against recorded fixtures
+tests/                    238 tests, offline, against recorded fixtures
 ```
 

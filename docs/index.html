@@ -65,7 +65,7 @@ signs off with his own initials, and talks about markets constantly without ever
   <div class="stat"><b>1,260</b><span>posts collected, 45 days</span></div>
   <div class="stat"><b>0</b><span>cashtags in all of them</span></div>
   <div class="stat"><b>37%</b><span>posts with no text at all</span></div>
-  <div class="stat"><b>60</b><span>posts signed "President DJT"</span></div>
+  <div class="stat"><b>61</b><span>posts signed "President DJT"</span></div>
 </div>
 
 <h2>Getting the data</h2>
@@ -180,7 +180,8 @@ The rules alone score 0.88 precision and 0.80 recall on the same data.</p>
 
 <p class="note">Both misses are explainable. One is a bare link with the company name only in the
 URL, and URLs are deliberately ignored so that site names do not become false alarms. The other is a
-threat to sue the New York Times, which is a public company, so the label counts it. Complaints
+post about his lawsuit against the New York Times, which is a public company, so the label counts
+it. Complaints
 about the New York Times as a newspaper are the single most common false alarm on this account,
 and the suppression that stops those also stops this one. S&amp;P Global used to be a third, until the
 lookup table grew to cover the S&amp;P 500.</p>
@@ -210,13 +211,14 @@ request rate predictable.</p>
   out of images would be the largest single improvement.</td></tr>
   <tr><td>The lexicon is a ceiling</td><td>It holds the S&amp;P 500 and eight ETFs, so anything outside that
   list cannot be found no matter how good the logic is.</td></tr>
-  <tr><td>Labels are model-generated</td><td>The evaluation labels were not produced by hand,
-  which makes the comparison between the rule-based and model-based detectors unreliable. Fixing
-  this needs human labeling. Until then treat every number above as provisional.</td></tr>
+  <tr><td>The labels were reviewed, not written, by hand</td><td>A model proposed a label for
+  every post and I read all 150 and made the final call, but reviewing a proposal is not the same
+  as labeling from scratch. It anchors you, and I agreed with every proposal, which is exactly
+  what anchoring looks like from the inside.</td></tr>
 </table>
 
 <footer>
-  <p>Prototype. Python, two dependencies, 235 tests that run without network access.
+  <p>Prototype. Python, two dependencies, 238 tests that run without network access.
   Full write-up and source in the repository.</p>
 </footer>
 

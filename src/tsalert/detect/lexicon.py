@@ -86,7 +86,12 @@ class Lexicon:
                     ambiguity=(row.get("ambiguity") or "").strip(),
                     ambiguous_aliases=ambiguous_aliases,
                     kind=kind,
-                    notes=row["notes"].strip(),
+                    # .get with a default, like kind and ambiguous_aliases
+                    # above: notes is not in `required`, so a CSV without the
+                    # column was raising a bare KeyError past LexiconError and
+                    # out of startup. A short row leaves the value None rather
+                    # than absent, so the `or ""` covers that too.
+                    notes=(row.get("notes") or "").strip(),
                 )
         return cls(entries)
 
