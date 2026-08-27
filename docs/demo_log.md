@@ -1,9 +1,9 @@
 # Demo log
 
-Two runs, captured verbatim. Neither needs credentials or network access, so both
-reproduce on a clean clone.
+Captured runs. The first two need no credentials or network and reproduce on a
+clean clone. The third is a real delivery to Telegram.
 
-## Offline end to end, replaying real archive posts
+## 1. Offline end to end, replaying real archive posts
 
 ```
 $ uv run python agent.py run --once --source demo
@@ -46,14 +46,14 @@ poll 1: 8 new post(s), 4 alert(s) sent
 stopped after 1 poll(s), 8 new post(s), 4 alert(s) sent
 ```
 
-The eight posts are real, pulled from the 45 day archive. Four name a company and
-alert. The other four mention a company word in a sense that is not the company
-(Intel as intelligence, ABC News and Fox News as broadcasters he is appearing on or
+Eight real posts from the 45 day archive. Four name a company and alert. The other
+four mention a company word in a sense that is not the company (Intel as
+intelligence, ABC News and Fox News as broadcasters he is appearing on or
 complaining about, New York Times as a bestseller list) and are correctly suppressed.
 
-## Dedup across a restart
+## 2. Dedup across a restart
 
-Running the same command again against the same database. Nothing is re-alerted.
+Same command, same database. Nothing is re-alerted.
 
 ```
 $ uv run python agent.py run --once --source demo
@@ -62,3 +62,30 @@ Active channels: console
 poll 1: 0 new post(s), 0 alert(s) sent
 stopped after 1 poll(s), 0 new post(s), 0 alert(s) sent
 ```
+
+## 3. Real delivery to Telegram
+
+Same pipeline with credentials set. Both channels are attempted per post and each
+is claimed separately, so one failing cannot suppress the other.
+
+```
+$ uv run python agent.py test-alert
+Active channels: console, telegram
+  console: delivered
+  telegram: delivered
+
+$ uv run python agent.py run --once --source demo
+poll 1: 8 new post(s), 4 alert(s) sent
+
+$ sqlite3 agent.db "select channel, post_id, status, attempts from alerts"
+console|116994500400281844|delivered|1
+console|117031897808226413|delivered|1
+console|117074526504264990|delivered|1
+console|117085013643913800|delivered|1
+telegram|116994500400281844|delivered|1
+telegram|117031897808226413|delivered|1
+telegram|117074526504264990|delivered|1
+telegram|117085013643913800|delivered|1
+```
+
+Eight records, four posts across two channels, all delivered on the first attempt.
