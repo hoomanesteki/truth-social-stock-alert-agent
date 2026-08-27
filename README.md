@@ -3,6 +3,40 @@
 Monitors the public Truth Social account `@realDonaldTrump` and sends an alert whenever a
 post mentions a publicly traded company, by ticker or by name. Runs locally.
 
+## How it works
+
+```mermaid
+flowchart LR
+  A["Truth Social<br/>JSON API"] -->|primary| D["dedup<br/><i>sqlite, survives restart</i>"]
+  B["trumpstruth.org<br/>RSS mirror"] -.->|"fallback after<br/>3 failures"| D
+  D --> R["rule detector<br/><i>95 ticker lexicon</i>"]
+  R -->|"candidate,<br/>about 1% of posts"| L["LLM confirm<br/><i>Groq</i>"]
+  R -->|"no candidate"| X["ignored"]
+  L --> S["alert<br/><i>Telegram + console</i>"]
+  D --> H["health monitor"]
+  H -.->|"nothing new<br/>for N hours"| S
+```
+
+Both sources return the same Truth Social status ids, so switching between them cannot
+re-alert a post that already went out. The LLM only ever sees posts the rules already
+flagged, which keeps cost and added latency small.
+
+### When something breaks
+
+Every failure below was tested by forcing it, not just handled in principle.
+
+| Failure | What happens |
+| --- | --- |
+| Primary API blocked or erroring | Circuit breaker opens after 3 consecutive failures and the RSS mirror takes over. It probes the primary again after a cooldown |
+| Rate limited with `Retry-After` | Honoured inside the retry and again between polls, so the next request waits as long as the server asked |
+| Endpoint changes shape | A page more than half unparseable raises rather than returning an empty list, so a silent schema change is loud |
+| Polls succeed but nothing arrives | `no_new_posts` heartbeat fires. State is on disk, so a restart cannot reset the clock |
+| Groq unavailable | The LLM arm falls back to the rule verdict and the agent keeps alerting |
+| Sentiment model fails | The alert goes out without the sentiment line |
+| Telegram down | Console still delivers, and the alert is retried on later polls |
+| Process dies mid delivery | The alert is re-sent on the next poll. Idempotency keys on post and channel, so nothing goes twice |
+| Process dies before detection | The post is picked up by a backlog pass and detected on the next poll |
+
 ## Setup
 
 Requires Python 3.11. The system Python on macOS is 3.9 and will not work.
@@ -102,9 +136,9 @@ The image is 261MB and the default command needs no network, so `docker run --rm
 
 Truth Social runs a Mastodon fork, so its own web client calls
 `/api/v1/accounts/{id}/statuses`. Clean JSON, and `min_id` returns only what is new. The
-obstacle is Cloudflare: `requests` and `curl` both get 403. TLS fingerprint impersonation
-gets through, `curl_cffi` with `impersonate="safari17_0"`. `chrome124` is still blocked, so
-I found that by trying a few rather than understanding their rules.
+obstacle is Cloudflare: `requests` and `curl` both get 403. Impersonating a browser's TLS
+fingerprint gets through, `curl_cffi` set to `safari17_0`. Chrome is still blocked, so I
+found the working one by trying a few rather than understanding their rules.
 
 | Option | Verdict |
 | --- | --- |
@@ -113,37 +147,32 @@ I found that by trying a few rather than understanding their rules.
 | Headless browser, third-party aggregators | Rejected. Slower and more brittle, no gain over JSON |
 
 It is also the most fragile, depending on a Cloudflare setting I neither control nor get
-warning about. So after enough consecutive failures the agent switches itself to the RSS
-mirror, which carries worse data, just text and ids, but keeps running.
+warning about, which is why the mirror sits behind it.
 
 **Polling** floats 60 to 300 seconds plus jitter, so real delays land near 48 to 360. Quiet
 polls back off, any new post resets to base. Replaying the real history gives 305 requests a
 day against 1,440 for a flat 60 second poll.
 
-**Detection** is a rule baseline plus an LLM arm. Each lexicon row rates its ticker's
-ambiguity, and riskier ones need more context. Here *trade* and *economy* are ordinary
-political words, so context splits into strong (stock, shares, earnings) and weak. Without
-that, his habit of shouting in capitals turns ALL, BIG and NOW into noise.
+**Detection** pairs a rule baseline with an LLM arm. Each lexicon row rates its ticker's
+ambiguity and riskier ones need more context, because here *trade* and *economy* are ordinary
+political words. Context splits into strong (stock, shares, earnings) and weak. Without that
+split, his habit of shouting in capitals turns ALL, BIG and NOW into noise.
 
 ## 2. Results
 
-Three facts from the 1,260 post archive shaped everything. There are zero cashtags in it, so
-`$DJT` is implemented but never exercised by real data. 472 posts, 37 percent, have no text
-at all and are invisible to a text detector. And all 60 bare `DJT` tokens are his sign-off,
-none the ticker.
+Three facts from the 1,260 post archive shaped everything. Zero cashtags appear, so `$DJT` is
+implemented but never exercised by real data. 472 posts, 37 percent, carry no text and are
+invisible to a text detector. And all 60 bare `DJT` tokens are his sign-off, none the ticker.
 
-Stock mentions are rare enough that a random sample of 150 would turn up almost none, so the
-set uses three groups. Candidates (23) are every post the rules flagged, labelled completely
-rather than sampled, so precision on them is exact. Random (102) is a plain sample reweighted
-by 3.62 to stand for the archive, and it is what makes recall measurable. Traps (25) are
-posts a heuristic picked as classic lookalikes, scored on their own because a rule built that
-pool rather than chance.
+Mentions are rare enough that a random 150 would turn up almost none, so the set uses three
+groups: candidates (23, every post the rules flagged, labelled completely so precision is
+exact), random (102, reweighted by 3.62 to stand for the archive, which makes recall
+measurable), and traps (25, lookalikes a rule picked out, scored separately). Together they
+hold 15 real mentions.
 
-Weighting candidate and random together, the sample holds 15 real mentions. Classification is
-the yes or no call: precision is how many alerts were real, recall how many real mentions got
-caught, F1 balances the two. Ticker scores the same way on whether the right company was
-named, which is half the task. Exact set is how many of the 15 got their whole ticker list
-right, traps how many of the 25 lookalikes stayed silent.
+Precision is how many alerts were real, recall how many real mentions got caught, F1 balances
+the two. Ticker scores the same on whether the right company was named. Exact set counts how
+many of the 15 got their whole ticker list right.
 
 | Arm | Class P / R / F1 | Ticker P / R / F1 | Exact set | Traps |
 | --- | --- | --- | --- | --- |
@@ -152,61 +181,59 @@ right, traps how many of the 25 lookalikes stayed silent.
 | **combined, ships** | 1.000 / 0.738 / 0.849 | 0.897 / 0.849 / 0.872 | 13/15 | 25/25 |
 
 Resampling the rule arm 2,000 times puts its true F1 between 0.558 and 0.968 at 95 percent
-confidence. Fifteen positives cannot pin it tighter.
-Gating the LLM on rule candidates lets combined drop a false positive but never recover a
-miss, so it inherits 0.738 recall by construction. What it buys is precision. Both misses
-are known: S&P Global is not in the lexicon, and a bare link, since URLs are stripped.
+confidence. Gating the LLM on rule candidates lets combined drop a false positive but never
+recover a miss, so it inherits 0.738 recall by construction. What it buys is precision. Both
+misses are known: S&P Global is outside the lexicon, and a bare link, since URLs are
+stripped.
 
 **The LLM's 1.000 is not a measurement.** `gpt-oss-120b` proposed every label and a stronger
 model adjudicated all 150, changing 8 without flipping a verdict, so the labels match that
-arm's own predictions 150 out of 150. A third model relabeled blind and agreed on 149, which
+arm's own predictions 150 out of 150. A third model relabelled blind and agreed on 149, which
 makes them consistent rather than independent, since every step is a language model.
-`evaluate.py` detects this and warns. A real comparison needs human labels. The scored model
-is also `gpt-oss-120b` while the agent defaults to `qwen3.6-27b`.
+`evaluate.py` detects this and warns. The scored model is `gpt-oss-120b`; the agent runs
+`qwen3.6-27b`.
 
-**Latency**, measured over a 90 poll run: three usable samples took 26, 79 and 154 seconds
-from a post going up to the agent fetching it, then 7.4 ms to decide and 0.3 ms to send. The
-poll interval is the whole budget, which makes backoff a latency decision as much as a
-politeness one. A fourth sample at 824 seconds is thrown out as a cold start, leaving three,
-because no other stock post happened to arrive during the run.
+**Latency** over a 90 poll run: 26, 79 and 154 seconds from a post appearing to the agent
+fetching it, then 7.4 ms to decide and 0.3 ms to send. The poll interval is the whole budget,
+which makes backoff a latency decision as much as a politeness one. A fourth sample at 824
+seconds is dropped as a cold start, leaving three, because no other stock post arrived during
+the run.
 
 ## 3. Robustness and ethics
 
-The quiet failure is the one worth engineering against. A 404 is obvious; a 200 with a
-changed shape is not, and the parser returns empty while everything looks healthy. So a page
-more than half unparseable raises, and a `no_new_posts` heartbeat fires when polls succeed
-but nothing arrives. That alarm state is saved to disk, so a restart cannot quietly reset the
-clock and bury an outage. Behind those sit a circuit breaker and error streak alarms, rate limited so nobody
-learns to ignore them.
+The failure table above lists what breaks and what catches it. The one worth naming is the
+quiet one: a 404 is obvious, but a 200 with a changed shape is not, and the parser just
+returns empty while everything looks fine. Hence an unparseable page raising rather than
+returning nothing, and a heartbeat watching for polls that succeed while nothing arrives.
 
-Politeness is in code: a 2.5 second floor between requests, an hourly cap that refuses past
-600, `Retry-After` honoured inside a retry and between polls, strictly sequential requests.
-The cap matters most, since backoff stays correct right until a loop bug turns it into a
-hammer.
+Politeness is in code rather than in a comment promising it: a 2.5 second floor between
+requests, an hourly cap that refuses past 600, `Retry-After` honoured, strictly sequential
+requests. The cap matters most, since backoff stays correct right until a loop bug turns it
+into a hammer.
 
 This reads public pages with no account and keeps only public post text. The mirror allows
 crawling; Truth Social publishes no `robots.txt`. I would not oversell that: automated access
-likely conflicts with their terms anyway, and impersonating a fingerprint works around bot
-protection, which goes past reading a page. One request a minute seems proportionate for a
-prototype. For real use I would want a licensed feed.
+likely conflicts with their terms anyway, and impersonating a browser fingerprint works
+around bot protection, which goes past reading a page. One request a minute seems
+proportionate for a prototype. For real use I would want a licensed feed.
 
 ## 4. Limitations and next steps
 
 Media-only posts are invisible; OCR is the answer. The lexicon caps recall, since the labels
-contain `SPGI`, `V`, `TM` and `TMUS`, none among the 95 rows. The same fifteen positives limit every interval here. And the labels are model generated, so the ML comparison is not
-trustworthy yet.
+contain `SPGI`, `V`, `TM` and `TMUS`, none among the 95 rows. Fifteen positives limit every
+interval here. And the labels are model generated, so the ML comparison is not trustworthy.
 
 **More accounts** is mostly scheduling now. Sources are per account, posts carry it, dedup
 keys on the status id, and the polling cursor is namespaced, which it was not until I ran two
 accounts against one database and watched the second overwrite the first. What is left is the
 loop: a priority queue keyed on each account's posting rate, so a busy one polls every minute
-and a quiet one drifts to fifteen, under one shared request budget.
+and a quiet one drifts to fifteen, under one shared budget.
 
-**Evaluating in production without labeling everything.** Run both arms over live traffic and
-hand-label only where they disagree, which puts the effort on the decision boundary and turns
-each delivered alert into a labeling opportunity, since a thumbs up or down in Telegram costs
-nothing. Alongside that, watch input drift rather than accuracy: candidate rate and ticker
-distribution need no labels, and a sharp move in either is the first hint something changed.
+**Evaluating in production** without labeling everything: run both arms over live traffic and
+hand-label only where they disagree, which puts effort on the decision boundary and turns each
+delivered alert into a labeling chance, since a thumbs up or down in Telegram costs nothing.
+Alongside that, watch input drift rather than accuracy. Candidate rate and ticker distribution
+need no labels, and a sharp move in either is the first hint something changed.
 
 ## Repository layout
 
