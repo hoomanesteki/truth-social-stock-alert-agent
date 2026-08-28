@@ -121,7 +121,14 @@ def build_channels(config: Config) -> list:
     # is isolated to telegram by the dispatcher, one bad channel never blocks
     # another.
     channels = [ConsoleChannel()]
-    telegram = TelegramChannel(config.telegram_bot_token, config.telegram_chat_id)
+    # REQUEST_TIMEOUT reached the source but not the channel, so the Telegram
+    # timeout was stuck at its own default however it was configured. That is
+    # the number that sets what an unreachable channel costs: four attempts at
+    # 20 seconds is about 85 seconds of a poll spent learning nothing.
+    telegram = TelegramChannel(
+        config.telegram_bot_token, config.telegram_chat_id,
+        timeout=config.request_timeout,
+    )
     if telegram.is_configured():
         channels.append(telegram)
     return channels

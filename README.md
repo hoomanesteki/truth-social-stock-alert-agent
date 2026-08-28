@@ -69,7 +69,9 @@ console.
 
 Telegram is blocked outright on some networks, including whole countries. If
 `setup_telegram.py` reports that it cannot reach the API, that is a blocked port rather than a
-bad token, and the console channel needs no network at all.
+bad token, and the console channel needs no network at all. On such a network every poll spends
+its Telegram timeout finding out what it already knows, so turn the timeout down
+(`REQUEST_TIMEOUT=3`) or leave `TELEGRAM_BOT_TOKEN` unset.
 
 | Variable | Needed for |
 | --- | --- |

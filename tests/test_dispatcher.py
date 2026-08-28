@@ -619,3 +619,18 @@ def test_probing_a_known_down_channel_costs_one_attempt(tmp_path):
         assert len(telegram.sent) - before == 1
         assert results[0].ok is True
         assert "telegram" not in dispatcher._known_down
+
+
+def test_telegram_channel_takes_the_configured_timeout():
+    """REQUEST_TIMEOUT has to reach the channel, not just the source.
+
+    The timeout is what an unreachable channel costs a poll: four attempts
+    at 20 seconds is roughly 85 seconds spent learning what the last poll
+    already knew. On a network that blocks Telegram outright, being able to
+    turn that down is the difference between a usable agent and one that
+    spends every poll waiting.
+    """
+    from tsalert.alerts.telegram import TelegramChannel
+
+    assert TelegramChannel("t", "c").timeout == 20
+    assert TelegramChannel("t", "c", timeout=3).timeout == 3
