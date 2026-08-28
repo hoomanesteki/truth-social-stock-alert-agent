@@ -180,9 +180,27 @@ def build_sentiment_scorer(config: Config) -> SentimentScorer | None:
 
 
 
-def print_active_channels(channels: list) -> None:
+def print_active_channels(channels: list, config: Config | None = None) -> None:
     names = ", ".join(c.name for c in channels)
     print(f"Active channels: {names}")
+    if config is None:
+        return
+    # Say why a channel is missing rather than just leaving it off the list.
+    # load_dotenv does not override variables already in the environment, so
+    # an empty TELEGRAM_BOT_TOKEN exported in the shell silently beats a good
+    # value in .env, and the only symptom is a channel quietly not being
+    # there. That is the documented way to turn Telegram off, so the fix is
+    # to make it visible, not to override it.
+    if not any(c.name == "telegram" for c in channels):
+        missing = [
+            name
+            for name, value in (("TELEGRAM_BOT_TOKEN", config.telegram_bot_token),
+                                ("TELEGRAM_CHAT_ID", config.telegram_chat_id))
+            if not value
+        ]
+        if missing:
+            print(f"  telegram is off: {' and '.join(missing)} empty. "
+                  f"A value exported in your shell overrides .env, even an empty one.")
 
 
 def print_config(config: Config) -> None:
@@ -234,7 +252,7 @@ def cmd_run(args: argparse.Namespace, config: Config) -> int:
 
         print(f"Source: {source_name}")
         print(f"Detector: {getattr(detector, 'name', detector_name)}")
-        print_active_channels(channels)
+        print_active_channels(channels, config)
 
         max_iterations = 1 if args.once else args.max_iterations
         runner.run(max_iterations=max_iterations)
@@ -246,7 +264,7 @@ def cmd_test_alert(args: argparse.Namespace, config: Config) -> int:
     with Store(config.db_path) as store:
         scorer = build_sentiment_scorer(config)
         channels = build_channels(config)
-        print_active_channels(channels)
+        print_active_channels(channels, config)
         dispatcher = AlertDispatcher(channels, store, sentiment_scorer=scorer)
         results = dispatcher.dispatch_ops(
             "test_alert", "This is a test alert sent from the command line."

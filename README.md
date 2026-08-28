@@ -82,7 +82,9 @@ its Telegram timeout finding out what it already knows, so turn the timeout down
 
 ```bash
 # Full end to end demo. No network, no credentials, real archive posts that mention companies.
-uv run python agent.py run --once --source demo
+# Use a throwaway database: dedup is permanent, so a second run on the same store is silent,
+# which is the point of run 2 below but not what you want the first time you look at it.
+DB_PATH=/tmp/demo.db uv run python agent.py run --once --source demo
 
 # Live monitoring
 uv run python agent.py run
