@@ -230,8 +230,7 @@ candidates means combined can drop a false positive but never recover a miss, so
 
 **The labels, and the trade-off.** `gpt-oss-120b` proposed a label per post, a second model labelled the same posts independently and agreed with the finished set on 149 of 150, and I read all 150 and made the call. Thirty I reviewed blind, to check I was reading rather than rubber-stamping.
 
-The honest part is the override count: zero. Reviewing a proposal anchors you, and both models
-come from one family, so their agreeing is weaker evidence than two people agreeing. These are labels one person checked. One thing is clean: the scored LLM arm is `qwen3.6-27b`, the model the agent runs, and it never touched the labels. An earlier version scored the labelling model and returned 1.000 on all 150 rows, measuring lineage, not skill. `evaluate.py` now warns when
+The honest part is the override count: zero. Reviewing a proposal anchors you, and both models come from one family, so their agreeing is weaker than two people agreeing. These are labels one person checked. One thing is clean: the scored LLM arm is `qwen3.6-27b`, the model the agent runs, and it never touched the labels. An earlier version scored the labelling model and returned 1.000 on all 150 rows, measuring lineage, not skill. `evaluate.py` now warns when
 an arm agrees completely. The rule arm predates the labelling.
 
 **Latency** over a 90 poll run: 26, 79 and 154 seconds from post to fetch, then 7.4 ms to decide and 0.3 ms to deliver. The poll interval is the whole budget, on three samples.
