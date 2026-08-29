@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import logging
 import time
 from datetime import datetime, timedelta, timezone
@@ -201,9 +202,42 @@ class AgentRunner:
         counter, so repeated_errors could not fire on the one thing it exists
         to catch.
         """
+        self._record_source_state()
         self.monitor.record_poll(ok=ok, new_posts=new_posts)
         for alarm in self.monitor.check():
             self.dispatcher.dispatch_ops(alarm.name, alarm.detail)
+
+    def _record_source_state(self) -> None:
+        """Persist which source is live, so the dashboard can show it.
+
+        The failover object lives in the agent process and the dashboard is a
+        separate one reading the same database, so without this the page had
+        no way to tell whether posts were arriving from the primary or from
+        the mirror. That is the single most useful thing to know when the
+        ingestion is the fragile part, and it was the one thing the page did
+        not show.
+        """
+        active = getattr(self.source, "active_source_name", None) or getattr(
+            self.source, "name", ""
+        )
+        self.store.set_state("active_source", active)
+        transition = getattr(self.source, "last_transition", None)
+        if transition is not None:
+            self.store.set_state(
+                "last_source_transition",
+                json.dumps({
+                    "at": transition.at.isoformat(),
+                    "from": transition.from_source,
+                    "to": transition.to_source,
+                    "reason": transition.reason,
+                }),
+            )
+        try:
+            health = self.source.health()
+        except Exception:  # a health probe must never break a poll
+            return
+        self.store.set_state("source_detail", str(getattr(health, "detail", "")))
+        self.store.set_state("source_ok", "1" if getattr(health, "ok", False) else "0")
 
     def _worth_alerting(self, post: Post) -> bool:
         """Both gates an alert has to pass: eligible, and recent enough."""

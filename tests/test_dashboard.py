@@ -370,3 +370,55 @@ def test_the_most_recent_error_is_the_one_reported(tmp_path):
         store.record_alert_result(old_post.id, "discord", "failed", "CURRENT")
 
         assert store.channel_stats()["discord"]["last_error"] == "CURRENT"
+
+
+def test_ingestion_state_is_empty_before_the_agent_has_run(tmp_path):
+    """An agent that has never polled must not render as a healthy primary.
+
+    The page describes both sources whatever happens, so the honest empty
+    state matters: "not polling yet" rather than a green primary nobody has
+    exercised.
+    """
+    db = tmp_path / "fresh.db"
+    with Store(db) as store:
+        store.init_schema()
+        state = dashboard.ingestion_state(store)
+
+    assert state == {"active": "", "detail": "", "ok": False, "last_transition": None}
+
+
+def test_ingestion_state_reads_what_the_agent_recorded(tmp_path):
+    """The agent and the dashboard are separate processes, so the only way
+    the page can know which source is live is through the store."""
+    import json as _json
+
+    db = tmp_path / "recorded.db"
+    with Store(db) as store:
+        store.init_schema()
+        store.set_state("active_source", "rss")
+        store.set_state("source_detail", "ok")
+        store.set_state("source_ok", "1")
+        store.set_state("last_source_transition", _json.dumps({
+            "at": "2026-08-29T12:00:00+00:00",
+            "from": "truthsocial",
+            "to": "rss",
+            "reason": "primary failed: cloudflare 403",
+        }))
+        state = dashboard.ingestion_state(store)
+
+    assert state["active"] == "rss"
+    assert state["ok"] is True
+    assert state["last_transition"]["from"] == "truthsocial"
+    assert "cloudflare" in state["last_transition"]["reason"]
+
+
+def test_a_corrupt_transition_record_does_not_break_the_page(tmp_path):
+    db = tmp_path / "corrupt.db"
+    with Store(db) as store:
+        store.init_schema()
+        store.set_state("active_source", "truthsocial")
+        store.set_state("last_source_transition", "{not json")
+        state = dashboard.ingestion_state(store)
+
+    assert state["active"] == "truthsocial"
+    assert state["last_transition"] is None

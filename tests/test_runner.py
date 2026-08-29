@@ -653,3 +653,33 @@ class _StaticSource:
     def fetch_latest(self, since_id=None):
         posts, self._posts = self._posts, []
         return posts
+
+
+def test_the_runner_records_which_source_is_live(tmp_path):
+    """The dashboard is a separate process reading the same database, so this
+    is the only channel through which it can learn whether posts are arriving
+    from the primary or from the mirror. That is the most useful thing to know
+    when ingestion is the fragile part, and the page had no way to show it.
+    """
+    store = make_store(tmp_path)
+    runner = make_runner(FixtureSource([DEMO_FIXTURE]), FakeDispatcher(), store)
+
+    runner.poll_once()
+
+    assert store.get_state("active_source") == "fixture"
+    assert store.get_state("source_ok") in ("0", "1")
+
+
+def test_a_failing_health_probe_does_not_break_the_poll(tmp_path):
+    """Recording source state is diagnostics. It must never be the reason a
+    poll fails."""
+    store = make_store(tmp_path)
+    source = FixtureSource([DEMO_FIXTURE])
+
+    def explode():
+        raise RuntimeError("health probe is broken")
+
+    source.health = explode
+    runner = make_runner(source, FakeDispatcher(), store)
+
+    assert runner.poll_once() == len(DEMO_IDS)

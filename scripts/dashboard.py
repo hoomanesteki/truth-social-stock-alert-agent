@@ -345,6 +345,28 @@ def channel_health(db_path: str) -> list[dict]:
     return rows
 
 
+def ingestion_state(store: Store) -> dict:
+    """Which source is live, and whether it has ever fallen back.
+
+    Written by the running agent each poll. When the agent has never run
+    these are all empty, which the page renders as "not polling yet" rather
+    than inventing a healthy looking default.
+    """
+    raw = store.get_state("last_source_transition")
+    transition = None
+    if raw:
+        try:
+            transition = json.loads(raw)
+        except json.JSONDecodeError:
+            transition = None
+    return {
+        "active": store.get_state("active_source") or "",
+        "detail": store.get_state("source_detail") or "",
+        "ok": store.get_state("source_ok") == "1",
+        "last_transition": transition,
+    }
+
+
 def build_state(db_path: str, pid_path: Path, metrics_path: Path, ticker_filter: str | None) -> dict:
     with Store(db_path) as store:
         stats = store.stats()
@@ -352,6 +374,7 @@ def build_state(db_path: str, pid_path: Path, metrics_path: Path, ticker_filter:
         health = monitor.status()
         alarms = active_alarms(monitor)
         interval = _int_or(store.get_state("poll_interval_seconds"), _DEFAULT_INTERVAL_SECONDS)
+        ingestion = ingestion_state(store)
         backfill_days = _int_or(store.get_state("backfill_days"), _DEFAULT_BACKFILL_DAYS)
 
     running, pid = process_status(pid_path)
@@ -392,6 +415,7 @@ def build_state(db_path: str, pid_path: Path, metrics_path: Path, ticker_filter:
         "tickers": tickers,
         "ticker_filter": ticker_filter,
         "channels": channel_health(db_path),
+        "ingestion": ingestion,
         "latency": latency_table(db_path),
         "metrics": read_metrics(metrics_path),
         "server_time": datetime.now(timezone.utc).isoformat(),
@@ -425,36 +449,60 @@ _PAGE_TEMPLATE = r"""<!doctype html>
 <title>Alert agent control room</title>
 <style>
 :root {
-  --bg: #f6f6f4;
-  --surface: #ffffff;
-  --surface-2: #f0f0ee;
-  --border: #e0e0dc;
-  --text: #17181a;
-  --muted: #6b6f76;
-  --accent: #2b6cb0;
-  --accent-weak: #dce8f5;
-  --green: #2f9e56;
-  --grey: #8a8f98;
-  --amber: #c67c1f;
-  --amber-bg: #fbeed9;
-  --radius: 12px;
-  --radius-sm: 10px;
+  /* Apple's system greys, which are tuned to sit calmly behind content
+     rather than compete with it. The page is mostly numbers, so the palette
+     stays neutral and colour is reserved for state. */
+  --bg: #f5f5f7;
+  --surface: rgba(255, 255, 255, 0.82);
+  --surface-solid: #ffffff;
+  --surface-2: #f0f0f3;
+  --border: rgba(0, 0, 0, 0.08);
+  --border-strong: rgba(0, 0, 0, 0.14);
+  --text: #1d1d1f;
+  --muted: #6e6e73;
+  --faint: #a1a1a6;
+  --accent: #0071e3;
+  --accent-hover: #0077ed;
+  --accent-weak: rgba(0, 113, 227, 0.1);
+  --green: #34c759;
+  --green-weak: rgba(52, 199, 89, 0.14);
+  --amber: #ff9f0a;
+  --amber-weak: rgba(255, 159, 10, 0.14);
+  --red: #ff3b30;
+  --red-weak: rgba(255, 59, 48, 0.12);
+  --grey: #8e8e93;
+  --amber-bg: rgba(255, 159, 10, 0.12);
+  --radius: 18px;
+  --radius-sm: 12px;
+  --radius-xs: 8px;
+  --shadow: 0 1px 2px rgba(0,0,0,0.04), 0 8px 24px rgba(0,0,0,0.06);
+  --shadow-lift: 0 2px 6px rgba(0,0,0,0.06), 0 16px 40px rgba(0,0,0,0.10);
+  --ease: cubic-bezier(0.4, 0, 0.2, 1);
   font-variant-numeric: tabular-nums;
 }
 @media (prefers-color-scheme: dark) {
   :root:not([data-theme="light"]) {
-    --bg: #121314;
-    --surface: #1a1b1d;
-    --surface-2: #202224;
-    --border: #303234;
-    --text: #edeef0;
-    --muted: #9a9ea6;
-    --accent: #6ea8dc;
-    --accent-weak: #203247;
-    --green: #4cbf78;
-    --grey: #8a8f98;
-    --amber: #e0a445;
-    --amber-bg: #3a2f18;
+    --bg: #000000;
+    --surface: rgba(28, 28, 30, 0.82);
+    --surface-solid: #1c1c1e;
+    --surface-2: #2c2c2e;
+    --border: rgba(255, 255, 255, 0.1);
+    --border-strong: rgba(255, 255, 255, 0.18);
+    --text: #f5f5f7;
+    --muted: #98989d;
+    --faint: #636366;
+    --accent: #0a84ff;
+    --accent-hover: #409cff;
+    --accent-weak: rgba(10, 132, 255, 0.18);
+    --green: #30d158;
+    --green-weak: rgba(48, 209, 88, 0.18);
+    --amber: #ff9f0a;
+    --amber-weak: rgba(255, 159, 10, 0.18);
+    --red: #ff453a;
+    --red-weak: rgba(255, 69, 58, 0.18);
+    --amber-bg: rgba(255, 159, 10, 0.16);
+    --shadow: 0 1px 2px rgba(0,0,0,0.5), 0 8px 24px rgba(0,0,0,0.4);
+    --shadow-lift: 0 2px 6px rgba(0,0,0,0.6), 0 16px 40px rgba(0,0,0,0.5);
   }
 }
 * { box-sizing: border-box; }
@@ -462,13 +510,18 @@ body {
   margin: 0;
   background: var(--bg);
   color: var(--text);
-  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
-  line-height: 1.45;
+  /* SF on Apple platforms, the closest system face elsewhere. Never a web
+     font: the page has to render instantly on localhost with no network. */
+  font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", Roboto, sans-serif;
+  line-height: 1.47;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  letter-spacing: -0.011em;
 }
 .wrap {
-  max-width: 1080px;
+  max-width: 1120px;
   margin: 0 auto;
-  padding: 2rem 1.25rem 4rem;
+  padding: 3rem 1.5rem 5rem;
 }
 header.page-head {
   display: flex;
@@ -476,25 +529,33 @@ header.page-head {
   align-items: baseline;
   flex-wrap: wrap;
   gap: 0.5rem;
-  margin-bottom: 1.5rem;
+  margin-bottom: 2rem;
 }
 header.page-head h1 {
-  font-size: 1.35rem;
+  font-size: 2rem;
   margin: 0;
-  font-weight: 650;
-  letter-spacing: -0.01em;
+  font-weight: 700;
+  letter-spacing: -0.028em;
 }
 header.page-head p {
   margin: 0;
   color: var(--muted);
-  font-size: 0.85rem;
+  font-size: 0.875rem;
 }
 section.card {
   background: var(--surface);
+  /* Translucency over the page background, the way system panels sit on the
+     desktop. Falls back to a flat surface where backdrop-filter is missing. */
+  backdrop-filter: saturate(180%) blur(20px);
+  -webkit-backdrop-filter: saturate(180%) blur(20px);
   border: 1px solid var(--border);
   border-radius: var(--radius);
-  padding: 1.5rem;
+  padding: 1.75rem;
   margin-bottom: 1.25rem;
+  box-shadow: var(--shadow);
+}
+@supports not (backdrop-filter: blur(1px)) {
+  section.card { background: var(--surface-solid); }
 }
 section.card h2 {
   font-size: 0.8rem;
@@ -517,20 +578,45 @@ section.card h2 {
   margin-bottom: 1.25rem;
 }
 .dot {
-  width: 13px;
-  height: 13px;
+  width: 12px;
+  height: 12px;
   border-radius: 50%;
   background: var(--grey);
-  transition: background 150ms ease;
+  transition: background 200ms var(--ease), box-shadow 200ms var(--ease);
   flex-shrink: 0;
+  position: relative;
 }
-.dot.running { background: var(--green); }
+.dot.running {
+  background: var(--green);
+  box-shadow: 0 0 0 4px var(--green-weak);
+}
+/* A slow pulse only while it is actually polling. Motion here means the
+   process is alive, so it must not run when the agent is stopped. */
+.dot.running::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: 50%;
+  background: var(--green);
+  animation: pulse 2.2s var(--ease) infinite;
+}
+@keyframes pulse {
+  0%   { transform: scale(1);   opacity: 0.7; }
+  70%  { transform: scale(2.6); opacity: 0; }
+  100% { transform: scale(2.6); opacity: 0; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .dot.running::after { animation: none; }
+}
 .dot.stopped { background: var(--grey); }
-.dot.degraded { background: var(--amber); }
+.dot.degraded {
+  background: var(--amber);
+  box-shadow: 0 0 0 4px var(--amber-weak);
+}
 .status-word {
-  font-size: 1.5rem;
+  font-size: 1.75rem;
   font-weight: 700;
-  letter-spacing: 0.01em;
+  letter-spacing: -0.02em;
 }
 .status-timing {
   margin-left: auto;
@@ -546,19 +632,28 @@ section.card h2 {
 .stat-tile {
   border: 1px solid var(--border);
   border-radius: var(--radius-sm);
-  padding: 0.85rem 1rem;
+  padding: 1rem 1.1rem;
   background: var(--surface-2);
+  transition: transform 200ms var(--ease), box-shadow 200ms var(--ease);
+}
+.stat-tile:hover {
+  transform: translateY(-1px);
+  box-shadow: var(--shadow);
 }
 .stat-tile .n {
-  font-size: 1.6rem;
-  font-weight: 700;
+  font-size: 2rem;
+  font-weight: 600;
   display: block;
+  letter-spacing: -0.03em;
+  line-height: 1.1;
 }
 .stat-tile .l {
   color: var(--muted);
-  font-size: 0.78rem;
-  text-transform: uppercase;
-  letter-spacing: 0.04em;
+  font-size: 0.75rem;
+  letter-spacing: -0.005em;
+}
+section.card h2 {
+  font-size: 0.75rem;
 }
 /* ---- controls ---- */
 .control-grid {
@@ -573,33 +668,65 @@ section.card h2 {
 .btn-row { display: flex; flex-wrap: wrap; gap: 0.5rem; }
 button {
   font: inherit;
+  font-size: 0.9rem;
+  font-weight: 500;
   cursor: pointer;
-  border-radius: var(--radius-sm);
-  border: 1px solid var(--border);
-  background: var(--surface-2);
+  border-radius: 980px;
+  border: 1px solid var(--border-strong);
+  background: var(--surface-solid);
   color: var(--text);
-  padding: 0.5rem 0.9rem;
-  transition: background 150ms ease, border-color 150ms ease, transform 150ms ease;
+  padding: 0.5rem 1.1rem;
+  transition: background 200ms var(--ease), border-color 200ms var(--ease),
+              transform 120ms var(--ease), opacity 200ms var(--ease);
 }
-button:hover { background: var(--accent-weak); border-color: var(--accent); }
-button:active { transform: translateY(1px); }
-button.primary { background: var(--accent); color: #fff; border-color: var(--accent); }
-button.primary:hover { filter: brightness(1.08); }
-button:disabled { opacity: 0.5; cursor: not-allowed; }
-button.preset.active { background: var(--accent); color: #fff; border-color: var(--accent); }
+button:hover:not(:disabled) { background: var(--surface-2); border-color: var(--accent); }
+button:active:not(:disabled) { transform: scale(0.97); }
+button:focus-visible { outline: 3px solid var(--accent-weak); outline-offset: 2px; }
+button.primary {
+  background: var(--accent);
+  color: #fff;
+  border-color: var(--accent);
+  font-weight: 600;
+}
+button.primary:hover:not(:disabled) { background: var(--accent-hover); border-color: var(--accent-hover); }
+button.danger { color: var(--red); border-color: var(--red-weak); }
+button.danger:hover:not(:disabled) { background: var(--red-weak); border-color: var(--red); }
+button:disabled { opacity: 0.4; cursor: not-allowed; }
+button.preset.active { background: var(--accent); color: #fff; border-color: var(--accent); font-weight: 600; }
+.source-row { display: flex; gap: 0.75rem; flex-wrap: wrap; margin-top: 1rem; }
+.source-card {
+  flex: 1 1 240px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 1rem 1.1rem;
+  background: var(--surface-2);
+  transition: border-color 200ms var(--ease), box-shadow 200ms var(--ease);
+}
+.source-card.active { border-color: var(--green); box-shadow: 0 0 0 3px var(--green-weak); }
+.source-card .role { font-size: 0.72rem; color: var(--muted); letter-spacing: 0.02em; }
+.source-card .who { font-size: 1.05rem; font-weight: 600; margin-top: 0.15rem; letter-spacing: -0.015em; }
+.source-card .detail { font-size: 0.8rem; color: var(--muted); margin-top: 0.3rem; }
+.transition {
+  margin-top: 0.9rem;
+  padding: 0.6rem 0.85rem;
+  border-radius: var(--radius-xs);
+  background: var(--amber-weak);
+  border-left: 3px solid var(--amber);
+  font-size: 0.85rem;
+}
 .channel-table { width: 100%; border-collapse: collapse; margin-top: 0.75rem; }
 .channel-table th, .channel-table td { padding: 0.45rem 0.6rem; border-bottom: 1px solid var(--border); text-align: left; }
 .channel-table th.num, .channel-table td.num { text-align: right; font-variant-numeric: tabular-nums; }
 .channel-name { font-weight: 600; }
 .channel-note { color: var(--muted); font-size: 0.85em; }
-.pill { display: inline-block; padding: 0.1rem 0.5rem; border-radius: 999px; font-size: 0.8em; font-weight: 600; }
-.pill.live { background: #d8f5e0; color: #14622f; }
-.pill.paused { background: #fdeccd; color: #7a4a05; }
-.pill.off { background: #eceef1; color: #5a6270; }
-.pill.failing { background: #fbdcdc; color: #8a1c1c; }
+.pill { display: inline-block; padding: 0.15rem 0.6rem; border-radius: 999px; font-size: 0.78em; font-weight: 600; letter-spacing: -0.005em; }
+.pill.live { background: var(--green-weak); color: var(--green); }
+.pill.paused { background: var(--amber-weak); color: var(--amber); }
+.pill.off { background: var(--surface-2); color: var(--muted); }
+.pill.failing { background: var(--red-weak); color: var(--red); }
 .risk { margin-top: 0.5rem; padding: 0.55rem 0.7rem; border-radius: 6px; border-left: 4px solid; font-size: 0.9em; }
-.risk.caution { background: #fff8e6; border-color: #d79a10; color: #6b4a02; }
-.risk.danger { background: #fdeaea; border-color: #c23030; color: #7d1414; }
+.risk.caution { background: var(--amber-weak); border-color: var(--amber); color: var(--text); }
+.risk.danger { background: var(--red-weak); border-color: var(--red); color: var(--text); }
 input[type="number"], input[type="text"] {
   font: inherit;
   font-variant-numeric: tabular-nums;
@@ -632,8 +759,22 @@ input[type="number"], input[type="text"] {
   background: var(--surface-2);
   text-align: center;
 }
-.funnel-stage .n { font-size: 1.9rem; font-weight: 700; display: block; }
-.funnel-stage .l { color: var(--muted); font-size: 0.78rem; text-transform: uppercase; letter-spacing: 0.04em; }
+.funnel-stage {
+  position: relative;
+  overflow: hidden;
+}
+/* Width proportional to the stage count, so the shape of the funnel is
+   visible at a glance rather than something you work out from four numbers. */
+.funnel-stage .bar {
+  position: absolute;
+  left: 0; bottom: 0;
+  height: 3px;
+  background: var(--accent);
+  border-radius: 0 3px 0 0;
+  transition: width 500ms var(--ease);
+}
+.funnel-stage .n { font-size: 1.9rem; font-weight: 600; display: block; letter-spacing: -0.03em; }
+.funnel-stage .l { color: var(--muted); font-size: 0.75rem; letter-spacing: -0.005em; }
 .funnel-arrow {
   display: flex;
   flex-direction: column;
@@ -728,6 +869,16 @@ footer.foot { text-align: center; color: var(--muted); font-size: 0.75rem; margi
     <div class="stat-tile"><span class="n" id="stat-alerts">-</span><span class="l">alerts delivered</span></div>
     <div class="stat-tile"><span class="n" id="stat-errors">-</span><span class="l">consecutive errors</span></div>
   </div>
+</section>
+
+<section class="card">
+  <h2>Ingestion</h2>
+  <p class="hint">Where posts are coming from right now. The primary is the JSON endpoint behind
+  Cloudflare, which is the fast path and the fragile one. After three consecutive failures the
+  circuit breaker opens and the RSS mirror takes over, then the primary is probed again after a
+  cooldown. Both return the same status ids, so a switch cannot re-alert a post.</p>
+  <div class="source-row" id="source-row"></div>
+  <div class="transition" id="source-transition" hidden></div>
 </section>
 
 <section class="card">
@@ -1042,16 +1193,96 @@ footer.foot { text-align: center; color: var(--muted); font-size: 0.75rem; margi
       ["candidate", p.candidate],
       ["alerted", p.alerted]
     ];
+    // Bar widths are relative to the first stage, so the funnel narrows the
+    // way the numbers do. Four bare numbers made you do that arithmetic.
+    var top = stages[0][1] || 1;
     var html = "";
     for (var i = 0; i < stages.length; i++) {
+      var pct = Math.max(1, Math.round((stages[i][1] / top) * 100));
       html += '<div class="funnel-stage"><span class="n">' + stages[i][1] +
-        '</span><span class="l">' + stages[i][0] + "</span></div>";
+        '</span><span class="l">' + stages[i][0] +
+        '</span><span class="bar" style="width:' + pct + '%"></span></div>';
       if (i < stages.length - 1) {
         var drop = stages[i][1] - stages[i + 1][1];
-        html += '<div class="funnel-arrow"><span class="arrow-glyph">-&gt;</span><span>-' + drop + "</span></div>";
+        html += '<div class="funnel-arrow"><span class="arrow-glyph">&#8594;</span><span>-' + drop + "</span></div>";
       }
     }
     qs("funnel").innerHTML = html;
+  }
+
+  function setIngestion(s) {
+    var ing = s.ingestion || {};
+    var row = qs("source-row");
+    row.innerHTML = "";
+
+    // Named here rather than read from the agent, because the page has to
+    // describe both sources even before the agent has ever run.
+    var sources = [
+      {key: "truthsocial", role: "Primary", who: "Truth Social JSON",
+       note: "Mastodon endpoint behind Cloudflare. Fast, and the fragile one."},
+      {key: "rss", role: "Fallback", who: "trumpstruth.org RSS",
+       note: "Takes over after three consecutive primary failures."}
+    ];
+    sources.forEach(function (src) {
+      var card = document.createElement("div");
+      card.className = "source-card" + (ing.active === src.key ? " active" : "");
+
+      var role = document.createElement("div");
+      role.className = "role";
+      role.textContent = ing.active === src.key ? src.role + " - live now" : src.role;
+
+      var who = document.createElement("div");
+      who.className = "who";
+      who.textContent = src.who;
+
+      var detail = document.createElement("div");
+      detail.className = "detail";
+      if (!ing.active) {
+        detail.textContent = "not polling yet";
+      } else if (ing.active === src.key) {
+        detail.textContent = ing.detail || (ing.ok ? "ok" : "no successful fetch yet");
+      } else {
+        detail.textContent = src.note;
+      }
+
+      card.appendChild(role);
+      card.appendChild(who);
+      card.appendChild(detail);
+      row.appendChild(card);
+    });
+
+    // A replay run (--source demo or fixture) is neither of the two, and
+    // showing both as idle would read as "nothing is happening" when
+    // something clearly is.
+    if (ing.active && ing.active !== "truthsocial" && ing.active !== "rss") {
+      var replay = document.createElement("div");
+      replay.className = "source-card active";
+      var r1 = document.createElement("div");
+      r1.className = "role";
+      r1.textContent = "Replay - live now";
+      var r2 = document.createElement("div");
+      r2.className = "who";
+      r2.textContent = ing.active;
+      var r3 = document.createElement("div");
+      r3.className = "detail";
+      r3.textContent = ing.detail || "recorded posts, no network";
+      replay.appendChild(r1);
+      replay.appendChild(r2);
+      replay.appendChild(r3);
+      row.insertBefore(replay, row.firstChild);
+    }
+
+    var box = qs("source-transition");
+    var t = ing.last_transition;
+    if (!t) {
+      box.hidden = true;
+      box.textContent = "";
+      return;
+    }
+    box.hidden = false;
+    // t.from is a reserved word in older parsers, so bracket access.
+    box.textContent = "Switched " + t["from"] + " to " + t["to"] + " " +
+      fmtAgo(t.at) + ". Reason: " + t.reason;
   }
 
   function setChips(s) {
@@ -1152,6 +1383,7 @@ footer.foot { text-align: center; color: var(--muted); font-size: 0.75rem; margi
     setLatency(s);
     setMetrics(s);
     renderChannels(s.channels);
+    setIngestion(s);
 
     var startBtn = qs("start-btn");
     var stopBtn = qs("stop-btn");

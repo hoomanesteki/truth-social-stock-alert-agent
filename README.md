@@ -127,10 +127,13 @@ One page on `http.server`, no new dependency. It shows:
 - a ticker filterable mentions feed
 - health and latency, reusing `latency_report.py`'s own maths
 - precision, recall and F1 read from `data/eval/metrics.md` when it exists
-- an alert channel panel: which channels are set up, live, paused or failing, with per channel
-  sent/queued/failed counts and a pause button. Pausing is written to the store, so the running
-  agent picks it up on the next poll without a restart, and anything missed while a channel was
-  off goes out when it comes back
+- an ingestion panel showing which source is live, primary or mirror, with the reason and time of
+  the last failover. The agent records this every poll, so the page reflects the process rather
+  than guessing
+- an alert channel panel: which channels are set up, live, paused, failing or dropping, with per
+  channel sent/queued/dropped counts and a pause button. Pausing is written to the store, so the
+  running agent picks it up on the next poll without a restart, and anything missed while a
+  channel was off goes out when it comes back, bounded by the same age gate live alerts use
 - a warning under the poll interval when the chosen value is aggressive enough to raise the odds
   of being blocked
 - the ticker lexicon editor
@@ -279,6 +282,6 @@ src/tsalert/
 scripts/                  backfill, eval set construction, labeling, evaluation, latency,
                           dashboard (bonus: local control panel on http.server)
 data/                     the 45 day archive, the lexicon, the evaluation set
-tests/                    264 tests, offline, against recorded fixtures
+tests/                    280 tests, offline, against recorded fixtures
 ```
 
