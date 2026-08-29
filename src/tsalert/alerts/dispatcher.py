@@ -4,7 +4,7 @@ import json
 import logging
 import random
 import time
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Any, Callable
 
 from tsalert.alerts.base import AlertChannel, DeliveryResult, format_alert, format_ops_alert
@@ -34,6 +34,7 @@ class AlertDispatcher:
         sentiment_scorer: Any = None,
         base_delay: float = 2.0,
         sleep: Callable[[float], None] = time.sleep,
+        max_alert_age: timedelta | None = None,
     ) -> None:
         self.channels = channels
         self.store = store
@@ -54,6 +55,12 @@ class AlertDispatcher:
         self.sentiment_scorer = sentiment_scorer
         self.base_delay = base_delay
         self.sleep = sleep
+        # Same gate the runner applies to live alerts, applied again here
+        # because recover_undelivered dispatches directly and so never went
+        # through it. Resuming a channel paused for a week, or catching up
+        # after a long outage, would otherwise announce posts nobody wants
+        # any more.
+        self.max_alert_age = max_alert_age
         self._rng = random.Random()
         # Channels that used their whole retry budget and still failed. A
         # channel in here is skipped for the rest of the pass. Cleared at the
@@ -187,11 +194,21 @@ class AlertDispatcher:
                 if loaded is None:
                     continue
                 post, detection = loaded
+                if self._too_old(post):
+                    continue
                 # Recovered posts were ingested by an earlier run, so timing
                 # them measures how old the backlog is, not how fast we are.
                 results.extend(self.dispatch(post, detection, time_it=False))
         return results
 
+
+    def _too_old(self, post: Post) -> bool:
+        if self.max_alert_age is None:
+            return False
+        if datetime.now(timezone.utc) - post.created_at <= self.max_alert_age:
+            return False
+        logger.info("not recovering %s, it is older than the alert age limit", post.id)
+        return True
 
     def _format(self, post: Post, detection: Detection) -> str:
         """Render an alert, adding sentiment when a scorer is configured.

@@ -192,40 +192,29 @@ The image is 261MB and the default command needs no network, so `docker run --rm
 
 ## 1. Approach
 
-Truth Social runs a Mastodon fork, so its web client calls
-`/api/v1/accounts/{id}/statuses`: clean JSON, and `min_id` returns only what is new. The
-obstacle is Cloudflare, which 403s both `requests` and `curl`. Impersonating a browser's TLS
-fingerprint gets through, `curl_cffi` set to `safari17_0`. Chrome is still blocked, found by trial.
+Truth Social runs a Mastodon fork, so its web client calls `/api/v1/accounts/{id}/statuses`: clean JSON, and `min_id` returns only what is new. The obstacle is Cloudflare, which 403s both `requests` and `curl`. Impersonating a browser's TLS fingerprint gets through, `curl_cffi` set to `safari17_0`. Chrome is still blocked, found by trial.
 
 | Option | Verdict |
 | --- | --- |
-| Mastodon JSON + TLS impersonation | **Chosen.** Latency is bounded by the poll interval. Reliable while the fingerprint holds |
+| Mastodon JSON + TLS impersonation | **Chosen.** Latency bounded by the poll interval |
 | `trumpstruth.org` RSS mirror | **Fallback.** Same status ids, so failover cannot double-alert |
-| Headless browser, aggregators | Rejected. Slower and more brittle, no gain over JSON |
+| Headless browser, aggregators | Rejected. Slower, brittler, no gain over JSON |
 
-It is also the most fragile, resting on a Cloudflare setting I neither control nor get warned
-about. Hence the mirror.
+It is also the most fragile, resting on a Cloudflare setting I neither control nor get warned about.
 
 **Polling** floats 30 to 60 seconds. Replaying the real posting history gives a median wait of
 21 seconds and a worst case of 71, since the jitter overshoots the cap. That costs volume: roughly 1,450 requests a day against 316
-for the 60 to 300 range I started with. Latency won, and the throttle and hourly cap still
-bound the worst case.
+for the 60 to 300 range I started with. Latency won, and the throttle and cap still bound it.
 
 **Detection** pairs a rule baseline with an LLM arm over a 531 row table: the S&P 500, eight
-ETFs, and companies he names outside the index. Each row rates its ticker's ambiguity, and
-riskier ones need more context, because *trade* and *economy* are ordinary political words
-here. Context splits into strong (stock, shares, earnings) and weak. Without that split,
-capitals turn ALL and NOW into noise, and so do Ball and Progressive.
+ETFs, and companies he names outside the index. Each row rates its ambiguity, and riskier ones need more context, since *trade* and *economy* are ordinary political words here. Context splits into strong (stock, shares, earnings) and weak. Without it, capitals turn ALL and NOW into noise, and so do Ball and Progressive.
 
 ## 2. Results
 
-Three facts from the 1,260 post archive shaped everything. No cashtags at all, so `$DJT` is implemented
-but never exercised. 472 posts, 37 percent, carry no text. All 61 bare `DJT` tokens
-are his sign-off.
+Three facts from the 1,260 post archive shaped everything. No cashtags at all, so `$DJT` is implemented but never exercised. 472 posts, 37 percent, carry no text. All 61 bare `DJT` tokens are sign-offs.
 
-Mentions are rare enough that a random 150 would find almost none, so the set is stratified:
-candidates (23, every post the rules flagged, so precision is exact), random (102, reweighted by
-3.62 so recall is measurable), and traps (25, lookalikes scored separately). Together, 15 real mentions.
+Mentions are rare enough that a random 150 finds almost none, so the set is stratified:
+candidates (23, every post the rules flagged, so precision is exact), random (102, reweighted by 3.62 for recall), and traps (25, lookalikes scored separately). Together, 15 real mentions.
 
 | Arm | Class P / R / F1 | Ticker P / R / F1 | Exact set | Traps |
 | --- | --- | --- | --- | --- |
@@ -233,60 +222,33 @@ candidates (23, every post the rules flagged, so precision is exact), random (10
 | llm | 1.000 / 0.943 / 0.971 | 0.922 / 0.771 / 0.840 | 8/15 | 25/25 |
 | **combined, ships** | 1.000 / 0.738 / 0.849 | 0.844 / 0.882 / 0.862 | 12/15 | 25/25 |
 
-Resampling puts the shipping arm's F1 between 0.603 and 1.000. **I optimised for precision:** a
-miss costs one alert, a false alarm costs trust in every alert after it, and at one real
-mention a week a feed that cries wolf gets muted. Both rule false positives are one shape, a
-media outlet cited rather than discussed as a business which the
-LLM arm gets right.
+Resampling puts the shipping arm's F1 between 0.603 and 1.000. **I optimised for precision:** a miss costs one alert, a false alarm costs trust in every alert after it, and at one mention a week a feed that cries wolf gets muted. Both rule false positives are one shape, a
+media outlet cited rather than discussed as a business which the LLM gets right.
 
-The ticker column is where the arms separate, and not the way the headline suggests. The LLM
-wins the yes/no call and loses on naming the companies: 8 of 15 exact sets against the rules'
-12. It agrees a post is about stocks, then lists the wrong one. Gating the LLM on rule
-candidates means combined can drop a false positive but never recover a miss, so it inherits
-the rules' recall and ticker accuracy while keeping the LLM's precision.
+The ticker column is where the arms separate, and not the way the headline suggests. The LLM wins the yes/no call and loses on naming companies: 8 of 15 exact sets against the rules' 12. It agrees a post is about stocks, then lists the wrong one. Gating the LLM on rule
+candidates means combined can drop a false positive but never recover a miss, so it inherits the rules' recall and ticker accuracy with the LLM's precision.
 
-**The labels, and the trade-off.** `gpt-oss-120b` proposed a label per post, a second model
-labelled the same posts independently and agreed with the finished set on 149 of 150, and I read
-all 150 and made the final call. Thirty I reviewed blind, without seeing either proposal, to
-check I was reading rather than rubber-stamping.
+**The labels, and the trade-off.** `gpt-oss-120b` proposed a label per post, a second model labelled the same posts independently and agreed with the finished set on 149 of 150, and I read all 150 and made the call. Thirty I reviewed blind, to check I was reading rather than rubber-stamping.
 
-The honest part is the override count: zero. Reviewing a proposal anchors you in a way
-labelling cold does not, and both models come from one family, so their agreeing is weaker
-evidence than two people agreeing. These are labels one person checked.
-One thing is kept clean. The scored LLM arm is `qwen3.6-27b`, the model the agent runs, and it
-never touched the labels. An earlier version scored the labelling model and returned 1.000 on all 150 rows,
-measuring lineage rather than skill. `evaluate.py` now warns when an arm agrees with the labels
-completely. The rule arm predates the labelling entirely.
+The honest part is the override count: zero. Reviewing a proposal anchors you, and both models
+come from one family, so their agreeing is weaker evidence than two people agreeing. These are labels one person checked. One thing is clean: the scored LLM arm is `qwen3.6-27b`, the model the agent runs, and it never touched the labels. An earlier version scored the labelling model and returned 1.000 on all 150 rows, measuring lineage, not skill. `evaluate.py` now warns when
+an arm agrees completely. The rule arm predates the labelling.
 
-**Latency** over a 90 poll run: 26, 79 and 154 seconds from post to fetch, then 7.4 ms to
-decide and 0.3 ms to reach the console. The poll interval is the whole budget. Three samples,
-plus a cold start dropped.
+**Latency** over a 90 poll run: 26, 79 and 154 seconds from post to fetch, then 7.4 ms to decide and 0.3 ms to deliver. The poll interval is the whole budget, on three samples.
 
 ## 3. Robustness and ethics
 
-In the failure table, the quiet failures matter most: a changed schema and a stalled poll
-both look like nothing is wrong, so both raise.
+In the failure table, the quiet failures matter most: a changed schema and a stalled poll both look like nothing is wrong, so both raise.
 
-Four channels, and the order is the design. File and console never touch the network, so they
-run first and an alert survives every remote channel failing at once. Discord is primary because a
-webhook URL is the whole credential; a Telegram token dies the moment you regenerate it, then
-fails looking exactly like a network outage. I hit both.
+Four channels, and the order is the design. File and console never touch the network, so they run first and an alert survives every remote channel failing at once. Discord is primary because a webhook URL is the whole credential, where a Telegram token dies the moment you regenerate it and then fails looking like an outage.
 
 Delivery is at least once: a post and channel pair is claimed in sqlite before sending, so
 restarts cannot resend, but a crash between the channel accepting and that write will. No
 idempotency key is on offer, and a duplicate beats a miss.
 
-The bug I would not have found by reasoning came from my own network blocking Telegram. Every
-alert spent the full retry budget alone, four timeouts and backoff each, so a poll that should
-take a second took six minutes. A channel that exhausts its budget is down, not flaky, so it is
-skipped for the rest of the poll and probed once, cheaply, on the next. Skipped alerts stay
-queued rather than counted as failures: spending their budget on sends that never happened would
-discard them. After: 88 seconds.
+The bug I would not have found by reasoning came from my network blocking Telegram. Every alert spent the full retry budget alone, four timeouts each, so a one second poll took six minutes. A channel that exhausts its budget is down, not flaky, so it is skipped for the rest of the poll and probed once, cheaply, next time. Skipped alerts stay queued rather than counted as failures: spending their budget on sends that never happened would discard them. After: 88 seconds.
 
-Politeness is in code, not a comment: a 2.5 second floor between requests, an hourly cap that
-refuses past 600, `Retry-After` honoured, requests sequential. The cap matters most,
-since backoff stays correct right up until a loop bug turns it into a hammer. The dashboard
-warns when a chosen interval is aggressive enough to raise the odds of a block.
+Politeness is in code, not a comment: a 2.5 second floor between requests, an hourly cap that refuses past 600, `Retry-After` honoured, requests sequential. The cap matters most, since backoff stays correct right up until a loop bug turns it into a hammer. The dashboard warns when an interval is aggressive enough to raise the odds of a block.
 
 This reads public pages with no account and keeps only public post text. The mirror's
 `robots.txt` allows crawling, Truth Social publishes none. Automated access likely conflicts with
@@ -296,17 +258,11 @@ licensed feed.
 
 ## 4. Limitations and next steps
 
-Media-only posts are invisible; OCR is the fix. The lexicon caps recall: the S&P 500 and eight
-ETFs, so a foreign or small cap name is unreachable. Fifteen positives limit every interval above.
+Media-only posts are invisible; OCR is the fix. The lexicon caps recall: the S&P 500 and eight ETFs, so a foreign or small cap name is unreachable. Fifteen positives limit every interval above.
 
-**More accounts** is mostly scheduling now. Sources are per account, posts record which one,
-and dedup keys on the status id; the cursor needed fixing, since one global value let a second
-account overwrite the first. What is left is a priority queue on posting rate.
+**More accounts** is mostly scheduling. Sources are per account, posts record which one, dedup keys on the status id, and the cursor needed fixing, since one global value let a second account overwrite the first. What is left is a priority queue on posting rate.
 
-**Evaluating in production** without labelling everything: run both arms over live traffic and
-hand-label only where they disagree, putting the effort on the decision boundary. Watch input
-drift too. Candidate rate and ticker distribution need no labels, and a sharp move in either is
-the first hint something changed.
+**Evaluating in production** without labelling everything: run both arms over live traffic and hand-label only where they disagree, putting the effort on the decision boundary. Watch input drift too: candidate rate and ticker distribution need no labels, and a sharp move in either is the first hint something changed.
 
 ## Repository layout
 

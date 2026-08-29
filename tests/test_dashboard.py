@@ -306,3 +306,67 @@ def test_pausing_a_channel_round_trips_through_the_store(tmp_path):
         store.set_channel_paused("discord", False)
     rows = dashboard.channel_health(str(db))
     assert [r["paused"] for r in rows if r["name"] == "discord"] == [False]
+
+
+def test_a_bad_setting_does_not_take_the_whole_page_down(tmp_path, monkeypatch):
+    """channel_health reads config, and BaseHTTPRequestHandler answers an
+    unhandled exception by sending nothing at all. One malformed value used
+    to kill the page, the JSON and every control with it."""
+    monkeypatch.setenv("MAX_ALERT_AGE_HOURS", "0")
+    db = tmp_path / "badconfig.db"
+    with Store(db) as store:
+        store.init_schema()
+
+    rows = dashboard.channel_health(str(db))
+    assert len(rows) == 4
+    assert all(r["configured"] is False for r in rows)
+    assert "config unreadable" in (rows[0]["last_error"] or "")
+
+
+def test_a_channel_dropping_every_alert_is_not_reported_as_healthy(tmp_path):
+    """permanent_failure rows leave no queue and no failed rows behind them,
+    so a deleted webhook rendered as live with zero of everything."""
+    from tsalert.alerts.dispatcher import AlertDispatcher
+    from tsalert.sources.base import PermanentSourceError
+    import sys
+    sys.path.insert(0, str(Path(__file__).parent))
+    from test_dispatcher import FakeChannel, make_detection, make_post, no_sleep
+
+    db = tmp_path / "dropping.db"
+    with Store(db) as store:
+        store.init_schema()
+        post = make_post()
+        store.upsert_post(post)
+        channel = FakeChannel("discord", outcomes=[PermanentSourceError("status 404")])
+        AlertDispatcher([channel], store, sleep=no_sleep).dispatch(post, make_detection(post.id))
+
+        stats = store.channel_stats()
+        assert stats["discord"]["given_up"] == 1
+        assert stats["discord"]["failed"] == 0
+        assert stats["discord"]["delivered"] == 0
+
+    rows = {r["name"]: r for r in dashboard.channel_health(str(db))}
+    assert rows["discord"]["given_up"] == 1
+
+
+def test_the_most_recent_error_is_the_one_reported(tmp_path):
+    """first_attempt_at is the claim time, set once and never touched, so
+    ordering by it could surface a stale error as the current problem."""
+    import time
+    from test_dispatcher import make_detection, make_post
+
+    db = tmp_path / "errors.db"
+    with Store(db) as store:
+        store.init_schema()
+        old_post, new_post = make_post("a"), make_post("b")
+        for post in (old_post, new_post):
+            store.upsert_post(post)
+            store.save_detection(make_detection(post.id))
+
+        store.claim_alert(new_post.id, "discord")
+        store.record_alert_result(new_post.id, "discord", "failed", "STALE")
+        time.sleep(0.01)
+        store.claim_alert(old_post.id, "discord")
+        store.record_alert_result(old_post.id, "discord", "failed", "CURRENT")
+
+        assert store.channel_stats()["discord"]["last_error"] == "CURRENT"

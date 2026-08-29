@@ -1,7 +1,7 @@
 # Demo log
 
-Captured from the current code. The first two runs need no credentials and no network access,
-so they reproduce on a clean clone. The third needs a Telegram bot token.
+Captured from the current code. The two runs below were made with no credentials configured, so
+they show exactly what a fresh clone prints, and they need no network access.
 
 ## 1. Offline end to end, replaying real archive posts
 
@@ -9,7 +9,9 @@ so they reproduce on a clean clone. The third needs a Telegram bot token.
 $ uv run python agent.py run --once --source demo
 Source: demo
 Detector: rules
-Active channels: console
+Active channels: file, console
+  discord is off: DISCORD_WEBHOOK_URL empty. This is the primary remote channel, see the README for the 30 second setup.
+  telegram is off: TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID empty. A value exported in your shell overrides .env, even an empty one.
 STOCK MENTION: NVDA
 companies: Nvidia
 posted: 2026-07-27 23:20 UTC
@@ -51,6 +53,10 @@ mention a company word in a sense that is not the company (Intel as intelligence
 and Fox News as broadcasters he is appearing on or complaining about, New York Times as a
 bestseller list) and are correctly suppressed.
 
+Both remote channels are off here because nothing is configured, and the agent says so
+rather than leaving them quietly off the list. file and console need no credentials, so
+the alert is recorded and shown either way.
+
 ## 2. Dedup across a restart
 
 Same command, same database. Nothing is re-alerted.
@@ -59,15 +65,19 @@ Same command, same database. Nothing is re-alerted.
 $ uv run python agent.py run --once --source demo
 Source: demo
 Detector: rules
-Active channels: console
+Active channels: file, console
+  discord is off: DISCORD_WEBHOOK_URL empty. This is the primary remote channel, see the README for the 30 second setup.
+  telegram is off: TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID empty. A value exported in your shell overrides .env, even an empty one.
 poll 1: 0 new post(s), 0 alert(s) sent
 stopped after 1 poll(s), 0 new post(s), 0 alert(s) sent
 ```
 
-## 3. Real delivery to Telegram
+## 3. Real delivery to Telegram, captured earlier
 
-Same pipeline with credentials set. Both channels are attempted per post and each
-is claimed separately, so one failing cannot suppress the other.
+This one is from an earlier build, before the file sink existed and before Discord was added, so
+the channel list is shorter than what the runs above print. Kept because it is the only recording
+of a real remote delivery: the bot token has since been regenerated, which invalidates the old
+one, and `getMe` now answers 401.
 
 ```
 $ uv run python agent.py test-alert
@@ -95,8 +105,4 @@ telegram|117085013643913800|delivered|1
 
 Eight records, four posts across two channels, all delivered on the first attempt. The rows are
 sorted for reading; on disk they interleave, because a post is claimed once per channel as it is
-dispatched.
-
-This one needs a network that allows Telegram. This machine's blocks it, which is what turned up
-the outage bug described in the write-up, so the run above was captured earlier in the day from a
-network where the API was reachable. The two runs above it need no network at all.
+dispatched. The same run today would show twelve rows, since the file sink is now in the list.

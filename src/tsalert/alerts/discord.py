@@ -66,7 +66,15 @@ class DiscordChannel:
         self._handle_response(response)
 
     def _handle_response(self, response: Any) -> None:
-        status = getattr(response, "status_code", 0)
+        status = getattr(response, "status_code", None)
+        if not isinstance(status, int):
+            # A transport that returned something unexpected is a bug on our
+            # side, not a verdict from Discord. Falling through to the
+            # permanent branch discarded the alert forever on the strength of
+            # a status nobody sent.
+            raise TransientSourceError(
+                f"discord response had no usable status ({type(response).__name__})"
+            )
         # 204 is the documented success for a webhook with no wait parameter.
         # 200 shows up when Discord decides to return the created message.
         if status in (200, 204):
@@ -102,6 +110,19 @@ class DiscordChannel:
             return None
 
 
+def _utf16_length(text: str) -> int:
+    """Length the way Discord counts it.
+
+    The limit is on UTF-16 code units, not code points, so anything outside
+    the basic multilingual plane counts twice. Emoji are the common case and
+    his posts are full of them, so trimming to exactly 2000 code points could
+    still produce a 2001 unit payload. Discord answers that with a 400, which
+    this channel classifies as permanent, so the alert was dropped for good
+    rather than retried.
+    """
+    return sum(2 if ord(ch) > 0xFFFF else 1 for ch in text)
+
+
 def _fit(text: str) -> str:
     """Trim to Discord's hard limit, keeping the head of the alert.
 
@@ -109,7 +130,15 @@ def _fit(text: str) -> str:
     from the end loses post text rather than the part that says what the
     alert is about.
     """
-    if len(text) <= _MAX_MESSAGE_CHARS:
+    if _utf16_length(text) <= _MAX_MESSAGE_CHARS:
         return text
-    keep = _MAX_MESSAGE_CHARS - len(_TRUNCATED_MARKER)
-    return text[:keep] + _TRUNCATED_MARKER
+    budget = _MAX_MESSAGE_CHARS - _utf16_length(_TRUNCATED_MARKER)
+    used = 0
+    cut = 0
+    for index, ch in enumerate(text):
+        width = 2 if ord(ch) > 0xFFFF else 1
+        if used + width > budget:
+            break
+        used += width
+        cut = index + 1
+    return text[:cut] + _TRUNCATED_MARKER

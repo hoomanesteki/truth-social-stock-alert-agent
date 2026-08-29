@@ -242,3 +242,129 @@ def test_channel_stats_separate_the_failing_channel_from_the_healthy_one(tmp_pat
         assert stats["discord"]["delivered"] == 0
         assert stats["discord"]["failed"] == 1
         assert "timed out" in (stats["discord"]["last_error"] or "")
+
+
+# -- the file sink is not infallible, only independent -------------------
+
+
+def test_a_disk_error_is_transient_not_a_crash(tmp_path):
+    """The safety net channel must not be the one that takes the rest down.
+
+    It runs first, and a bare OSError from it escaped the dispatcher, the
+    poll loop and run() itself. Worse, the claim row was left pending, so on
+    restart retry_failed hit the same channel first and died again: a crash
+    loop that never fetched a post. A full disk is transient, like any other
+    channel's outage.
+    """
+    from tsalert.sources.base import TransientSourceError
+
+    locked = tmp_path / "locked"
+    locked.mkdir()
+    locked.chmod(0o500)
+    try:
+        with pytest.raises(TransientSourceError):
+            FileChannel(locked / "alerts.jsonl").send("hello")
+    finally:
+        locked.chmod(0o700)
+
+
+def test_a_failing_file_sink_does_not_block_the_other_channels(tmp_path):
+    from tsalert.alerts.dispatcher import AlertDispatcher
+    from tsalert.store import Store
+    from test_dispatcher import FakeChannel, make_detection, make_post, no_sleep
+
+    locked = tmp_path / "locked"
+    locked.mkdir()
+    locked.chmod(0o500)
+    post = make_post()
+    console = FakeChannel("console")
+    try:
+        with Store(tmp_path / "blocked.db") as store:
+            store.upsert_post(post)
+            dispatcher = AlertDispatcher(
+                [FileChannel(locked / "a.jsonl"), console], store, sleep=no_sleep
+            )
+            dispatcher.dispatch(post, make_detection(post.id))
+
+        assert len(console.sent) == 1
+    finally:
+        locked.chmod(0o700)
+
+
+def test_a_truncated_multibyte_character_does_not_hide_the_file(tmp_path):
+    """A crash mid-write can cut an emoji in half. Strict decoding turned
+    that into a UnicodeDecodeError for the whole file, so one bad byte made
+    every earlier line unreadable."""
+    path = tmp_path / "alerts.jsonl"
+    channel = FileChannel(path)
+    channel.send("good one")
+    with path.open("ab") as handle:
+        handle.write(b'{"written_at": "t", "text": "cafe \xf0\x9f')
+
+    assert [r["text"] for r in channel.read_recent()] == ["good one"]
+
+
+@pytest.mark.parametrize("limit", [0, -1])
+def test_a_nonpositive_limit_returns_nothing(tmp_path, limit):
+    """records[-0:] is the whole list, which is the opposite of a zero limit."""
+    channel = FileChannel(tmp_path / "alerts.jsonl")
+    for i in range(3):
+        channel.send(f"alert {i}")
+    assert channel.read_recent(limit=limit) == []
+
+
+# -- discord edge cases -------------------------------------------------
+
+
+def test_a_response_without_a_status_is_transient_not_a_silent_drop():
+    """A transport bug is not a verdict from Discord. Treating a missing
+    status as permanent discarded the alert forever on a status nobody sent."""
+    transport, _ = capturing_transport(object())
+    with pytest.raises(TransientSourceError):
+        DiscordChannel("https://hook", transport=transport).send("hi")
+
+
+def test_trimming_counts_the_way_discord_counts():
+    """Discord's 2000 limit is on UTF-16 code units, not code points. Emoji
+    count double, so trimming to 2000 characters could still produce a 2001
+    unit payload, which comes back 400 and is classified permanent: dropped
+    for good rather than retried."""
+    def utf16_len(text):
+        return sum(2 if ord(ch) > 0xFFFF else 1 for ch in text)
+
+    for text in ["x" * 5000, "\U0001F600" * 3000, ("\U0001F4C8a" * 2000)]:
+        assert utf16_len(_fit(text)) <= 2000
+
+
+# -- a paused channel must not starve the others ------------------------
+
+
+def test_a_paused_backlog_does_not_block_another_channels_retries(tmp_path):
+    """retryable_alerts has one window shared by every channel, oldest first.
+    A paused channel's rows keep their status forever, so a backlog on it sat
+    at the head of that window and pushed every other channel out. A pause is
+    operator controlled, so unlike a channel that is merely down, this never
+    resolved on its own.
+    """
+    from tsalert.store import Store
+    from test_dispatcher import make_detection, make_post
+
+    with Store(tmp_path / "starve.db") as store:
+        for i in range(60):
+            post = make_post(f"d{i:03d}")
+            store.upsert_post(post)
+            store.save_detection(make_detection(post.id))
+            store.claim_alert(post.id, "discord")
+            store.record_alert_result(post.id, "discord", "failed", "down")
+
+        late = make_post("t001")
+        store.upsert_post(late)
+        store.save_detection(make_detection(late.id))
+        store.claim_alert(late.id, "telegram")
+        store.record_alert_result(late.id, "telegram", "failed", "down")
+
+        store.set_channel_paused("discord", True)
+        retryable = store.retryable_alerts(5)
+
+        assert ("t001", "telegram") in retryable
+        assert all(channel != "discord" for _, channel in retryable)

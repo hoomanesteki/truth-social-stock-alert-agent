@@ -299,7 +299,24 @@ def channel_health(db_path: str) -> list[dict]:
     failing, because one channel at zero with a queue behind it and every
     channel failing at once need different responses.
     """
-    config = Config.from_env()
+    try:
+        # Reading .env from the repo root, not the process CWD. load_dotenv
+        # resolves a bare ".env" relative to wherever the dashboard was
+        # started, so launched from anywhere else the panel reported live
+        # channels as "not set up" while the agent, which is spawned with the
+        # repo root as its cwd, was happily delivering.
+        config = Config.from_env(str(_REPO_ROOT / ".env"))
+    except Exception as exc:
+        # One malformed setting used to raise out of build_state, and
+        # BaseHTTPRequestHandler answers an unhandled exception by sending
+        # nothing at all. The page, the JSON and every control died together
+        # over a value that only this panel needed.
+        logger_message = f"config unreadable: {exc}"
+        return [{
+            "name": name, "needs": needs, "description": description,
+            "configured": False, "paused": False, "delivered": 0, "queued": 0,
+            "failed": 0, "given_up": 0, "last_error": logger_message,
+        } for name, needs, description in _CHANNEL_SPECS]
     configured = {
         "file": True,
         "console": True,
@@ -721,7 +738,7 @@ footer.foot { text-align: center; color: var(--muted); font-size: 0.75rem; margi
   <table class="channel-table">
     <thead>
       <tr><th>Channel</th><th>State</th><th class="num">Sent</th><th class="num">Queued</th>
-      <th class="num">Failed</th><th></th></tr>
+      <th class="num">Dropped</th><th></th></tr>
     </thead>
     <tbody id="channel-rows"></tbody>
   </table>
@@ -946,6 +963,13 @@ footer.foot { text-align: center; color: var(--muted); font-size: 0.75rem; margi
       } else if (c.paused) {
         pill.className = "pill paused";
         pill.textContent = "paused";
+      } else if (c.given_up > 0) {
+        // permanent_failure: a deleted webhook or a revoked token. These are
+        // never retried, so they leave no queue and no failed rows behind
+        // them, and the panel used to call that "live" while the channel
+        // dropped every single alert.
+        pill.className = "pill failing";
+        pill.textContent = "dropping";
       } else if (c.failed > 0 || c.queued > 0) {
         pill.className = "pill failing";
         pill.textContent = "failing";
@@ -962,7 +986,7 @@ footer.foot { text-align: center; color: var(--muted); font-size: 0.75rem; margi
       }
       tr.appendChild(state);
 
-      ["delivered", "queued", "failed"].forEach(function (key) {
+      ["delivered", "queued", "given_up"].forEach(function (key) {
         var td = document.createElement("td");
         td.className = "num";
         td.textContent = c[key];
@@ -971,6 +995,9 @@ footer.foot { text-align: center; color: var(--muted); font-size: 0.75rem; margi
 
       var action = document.createElement("td");
       if (c.configured && c.name !== "file") {
+        // No button for the file sink: switching off the record of what the
+        // agent decided is not something a web page should offer. The
+        // endpoint refuses it too.
         // The file sink has no pause button on purpose. It is the record of
         // what the agent decided, and being able to switch off the audit
         // trail from a web page is not a feature.
@@ -1399,15 +1426,37 @@ class DashboardHandler(BaseHTTPRequestHandler):
         if name not in known:
             self._send_json(400, {"ok": False, "message": f"unknown channel: {name}"})
             return
-        paused = form.get("paused") == "1"
+        if name == "file":
+            # The client renders no button for this one, but the endpoint has
+            # to say no as well. Client side is not enforcement, and a paused
+            # file sink is an audit trail switched off with no control in the
+            # page to switch it back on.
+            self._send_json(
+                400,
+                {"ok": False, "message": "the file sink is the audit trail and cannot be paused"},
+            )
+            return
+        raw = form.get("paused")
+        if raw not in ("0", "1"):
+            # Anything else used to be read as "resume", so a typo or a
+            # missing field silently un-paused a channel and reported success.
+            self._send_json(
+                400, {"ok": False, "message": "paused must be 0 or 1"}
+            )
+            return
+        paused = raw == "1"
         with Store(self.db_path) as store:
             store.set_channel_paused(name, paused)
         word = "paused" if paused else "resumed"
         note = ""
         if not paused:
-            # Un-pausing is not just a flag flip from the operator's side:
-            # anything that came in while it was off is still owed.
-            note = " Anything missed while it was off goes out on the next poll."
+            # Stock alerts missed during the pause are recovered, bounded by
+            # the same age gate live alerts use, so resuming after a long
+            # pause does not announce last month. Ops alarms are not resent:
+            # they are point in time, and every one of them already went to
+            # the file sink, which cannot be paused.
+            note = (" Stock alerts missed while it was off go out on the next poll, "
+                    "if they are still recent enough to be worth sending.")
         self._send_json(200, {"ok": True, "message": f"{name} {word}.{note}"})
 
     def _handle_start(self) -> None:

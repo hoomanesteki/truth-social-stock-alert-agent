@@ -87,6 +87,7 @@ class Store:
         self._migrate_add_quoted_text()
         self._migrate_add_alert_eligible()
         self._migrate_add_alert_cycles()
+        self._migrate_add_last_error_at()
         self._conn.commit()
 
     def _migrate_add_quoted_text(self) -> None:
@@ -102,6 +103,19 @@ class Store:
         columns = {row[1] for row in self._conn.execute("PRAGMA table_info(alerts)")}
         if "cycles" not in columns:
             self._conn.execute("ALTER TABLE alerts ADD COLUMN cycles INTEGER DEFAULT 0")
+
+    def _migrate_add_last_error_at(self) -> None:
+        """When the last error happened, which first_attempt_at is not.
+
+        channel_stats used to order by first_attempt_at to find a channel's
+        most recent error, but that column is the claim time, set once when
+        the row is created and never touched again. An alert claimed later
+        with an older failure therefore won the sort, so the dashboard could
+        show a stale error as the channel's current problem.
+        """
+        columns = {row[1] for row in self._conn.execute("PRAGMA table_info(alerts)")}
+        if "last_error_at" not in columns:
+            self._conn.execute("ALTER TABLE alerts ADD COLUMN last_error_at TEXT")
 
     def _migrate_add_alert_eligible(self) -> None:
         cols = {r["name"] for r in self._conn.execute("PRAGMA table_info(posts)")}
@@ -201,8 +215,11 @@ class Store:
         cycle_increment = 1 if is_retry else 0
         self._conn.execute(
             "UPDATE alerts SET status=?, attempts=attempts+?, cycles=cycles+?, "
-            "delivered_at=COALESCE(?, delivered_at), last_error=? WHERE post_id=? AND channel=?",
-            (status, attempts_made, cycle_increment, delivered_at, error, post_id, channel),
+            "delivered_at=COALESCE(?, delivered_at), last_error=?, "
+            "last_error_at=CASE WHEN ? IS NULL THEN last_error_at ELSE ? END "
+            "WHERE post_id=? AND channel=?",
+            (status, attempts_made, cycle_increment, delivered_at, error,
+             error, now, post_id, channel),
         )
         self._conn.commit()
 
@@ -234,7 +251,7 @@ class Store:
         for channel in out:
             err = self._conn.execute(
                 "SELECT last_error FROM alerts WHERE channel=? AND last_error IS NOT NULL "
-                "ORDER BY first_attempt_at DESC LIMIT 1",
+                "ORDER BY COALESCE(last_error_at, first_attempt_at) DESC LIMIT 1",
                 (channel,),
             ).fetchone()
             out[channel]["last_error"] = err["last_error"] if err else None
@@ -304,12 +321,29 @@ class Store:
         alerts_queued, since a backlog nothing reports is a backlog nobody
         notices.
         """
-        rows = self._conn.execute(
-            "SELECT post_id, channel FROM alerts "
-            "WHERE status IN ('failed', 'pending') AND cycles < ? "
-            "ORDER BY first_attempt_at ASC LIMIT ?",
-            (max_cycles, limit),
-        ).fetchall()
+        paused = [
+            row[0][len(_CHANNEL_PAUSED_PREFIX):]
+            for row in self._conn.execute(
+                "SELECT key FROM agent_state WHERE key LIKE ? AND value='1'",
+                (_CHANNEL_PAUSED_PREFIX + "%",),
+            )
+        ]
+        # Paused channels are excluded in SQL rather than skipped by the
+        # caller. The limit is one window shared by every channel, ordered
+        # oldest first, so a paused channel with a backlog sat at the head of
+        # it and pushed every other channel's retries out of the window
+        # entirely. A pause is operator controlled and open ended, so unlike
+        # a channel that is merely down, that starvation never resolved on
+        # its own.
+        sql = ("SELECT post_id, channel FROM alerts "
+               "WHERE status IN ('failed', 'pending') AND cycles < ?")
+        params: list[Any] = [max_cycles]
+        if paused:
+            sql += " AND channel NOT IN (" + ",".join("?" * len(paused)) + ")"
+            params.extend(paused)
+        sql += " ORDER BY first_attempt_at ASC LIMIT ?"
+        params.append(limit)
+        rows = self._conn.execute(sql, params).fetchall()
         return [(row["post_id"], row["channel"]) for row in rows]
 
     def undelivered_stock_posts(self, channel: str, limit: int = 50) -> list[str]:

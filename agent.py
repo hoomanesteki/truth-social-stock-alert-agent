@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import dataclasses
+from datetime import timedelta
 import logging
 import sys
 from pathlib import Path
@@ -240,10 +241,19 @@ def cmd_run(args: argparse.Namespace, config: Config) -> int:
 
     scorer = build_sentiment_scorer(config)
 
+    # A fresh database against a live source would alert on whatever the
+    # first page happens to contain, which is a burst of messages about posts
+    # the recipient already saw. Replays are exempt: alerting is the whole
+    # point of the demo, and their posts are deliberately old.
+    is_replay = source_name in ("fixture", "demo")
+
     with Store(config.db_path) as store:
         source = build_source(source_name, config)
         channels = build_channels(config)
-        dispatcher = AlertDispatcher(channels, store, sentiment_scorer=scorer)
+        dispatcher = AlertDispatcher(
+            channels, store, sentiment_scorer=scorer,
+            max_alert_age=None if is_replay else timedelta(hours=config.max_alert_age_hours),
+        )
         monitor = HealthMonitor(
             store,
             stale_minutes=config.heartbeat_stale_minutes,
@@ -253,11 +263,6 @@ def cmd_run(args: argparse.Namespace, config: Config) -> int:
             base=config.poll_interval_seconds,
             max_interval=config.quiet_poll_interval_seconds,
         )
-        # A fresh database against a live source would alert on whatever the
-        # first page happens to contain, which is a burst of messages about
-        # posts the recipient already saw. Replays are exempt: alerting is the
-        # whole point of the demo.
-        is_replay = source_name in ("fixture", "demo")
         runner = AgentRunner(
             source, detector, dispatcher, store, monitor, interval,
             account=config.account,
@@ -281,6 +286,8 @@ def cmd_test_alert(args: argparse.Namespace, config: Config) -> int:
         scorer = build_sentiment_scorer(config)
         channels = build_channels(config)
         print_active_channels(channels, config)
+        # No age limit here: this command only sends an ops alert, which is
+        # about right now rather than about a post.
         dispatcher = AlertDispatcher(channels, store, sentiment_scorer=scorer)
         results = dispatcher.dispatch_ops(
             "test_alert", "This is a test alert sent from the command line."
