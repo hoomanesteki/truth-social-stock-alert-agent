@@ -247,7 +247,7 @@ idempotency key is on offer, and a duplicate beats a miss.
 
 The bug I would not have found by reasoning came from my network blocking Telegram. Every alert spent the full retry budget alone, four timeouts each, so a one second poll took six minutes. A channel that exhausts its budget is down, not flaky, so it is skipped for the rest of the poll and probed once, cheaply, next time. Skipped alerts stay queued rather than counted as failures: spending their budget on sends that never happened would discard them. After: 88 seconds.
 
-Politeness is in code, not a comment: a 2.5 second floor between requests, an hourly cap that refuses past 600, `Retry-After` honoured, requests sequential. The cap matters most, since backoff stays correct right up until a loop bug turns it into a hammer. The dashboard warns when an interval is aggressive enough to raise the odds of a block.
+Politeness is in code, not a comment: a 2.5 second floor between requests, an hourly cap that refuses past 600, `Retry-After` honoured, requests sequential. The cap matters most, since backoff stays correct right up until a loop bug turns it into a hammer. The dashboard warns when an interval is aggressive enough to risk a block.
 
 This reads public pages with no account and keeps only public post text. The mirror's
 `robots.txt` allows crawling, Truth Social publishes none. Automated access likely conflicts with
