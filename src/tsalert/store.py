@@ -60,6 +60,7 @@ CREATE INDEX IF NOT EXISTS idx_posts_created_at ON posts(created_at);
 CREATE INDEX IF NOT EXISTS idx_posts_is_stock_related ON posts(is_stock_related);
 """
 
+_CHANNEL_PAUSED_PREFIX = "channel_paused_"
 _LATENCY_COLUMNS = {"published_at", "fetched_at", "detected_at", "delivered_at"}
 
 
@@ -204,6 +205,51 @@ class Store:
             (status, attempts_made, cycle_increment, delivered_at, error, post_id, channel),
         )
         self._conn.commit()
+
+    def channel_stats(self) -> dict[str, dict[str, Any]]:
+        """Per channel delivery counts and the last error each one saw.
+
+        The aggregate in stats() hides the thing you actually want during an
+        outage, which is which channel is failing. One channel sitting at
+        zero delivered with a queue behind it is a different problem from
+        every channel failing at once.
+        """
+        rows = self._conn.execute(
+            "SELECT channel, status, COUNT(*) AS n FROM alerts GROUP BY channel, status"
+        ).fetchall()
+        out: dict[str, dict[str, Any]] = {}
+        for row in rows:
+            entry = out.setdefault(
+                row["channel"],
+                {"delivered": 0, "queued": 0, "failed": 0, "given_up": 0, "last_error": None},
+            )
+            key = {
+                "delivered": "delivered",
+                "pending": "queued",
+                "failed": "failed",
+                "permanent_failure": "given_up",
+            }.get(row["status"])
+            if key:
+                entry[key] = row["n"]
+        for channel in out:
+            err = self._conn.execute(
+                "SELECT last_error FROM alerts WHERE channel=? AND last_error IS NOT NULL "
+                "ORDER BY first_attempt_at DESC LIMIT 1",
+                (channel,),
+            ).fetchone()
+            out[channel]["last_error"] = err["last_error"] if err else None
+        return out
+
+    def is_channel_paused(self, channel: str) -> bool:
+        """Paused channels are skipped without being recorded as failures.
+
+        Set from the dashboard and read by the running agent, so the two
+        processes agree through the database rather than needing a restart.
+        """
+        return self.get_state(_CHANNEL_PAUSED_PREFIX + channel) == "1"
+
+    def set_channel_paused(self, channel: str, paused: bool) -> None:
+        self.set_state(_CHANNEL_PAUSED_PREFIX + channel, "1" if paused else "0")
 
     def get_state(self, key: str, default: Any = None) -> Any:
         row = self._conn.execute("SELECT value FROM agent_state WHERE key=?", (key,)).fetchone()

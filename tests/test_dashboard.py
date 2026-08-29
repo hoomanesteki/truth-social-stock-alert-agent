@@ -266,3 +266,43 @@ def test_settings_written_through_the_dashboard_survive_being_read_back(tmp_path
     data = json.loads(body)
     assert data["poll_interval_seconds"] == 180
     assert data["backfill_days"] == 30
+
+
+def test_channel_health_lists_every_channel_including_the_unconfigured(tmp_path, monkeypatch):
+    """The page has to describe a channel that is switched off.
+
+    build_channels deliberately leaves unconfigured channels out of its list,
+    so the dashboard keeps its own roster. Otherwise Discord not being set up
+    would look identical to Discord not existing.
+    """
+    monkeypatch.delenv("DISCORD_WEBHOOK_URL", raising=False)
+    monkeypatch.setenv("TELEGRAM_BOT_TOKEN", "")
+    monkeypatch.setenv("TELEGRAM_CHAT_ID", "")
+    db = tmp_path / "channels.db"
+    with Store(db) as store:
+        store.init_schema()
+
+    rows = dashboard.channel_health(str(db))
+    names = [r["name"] for r in rows]
+    assert names == ["file", "console", "discord", "telegram"]
+    by_name = {r["name"]: r for r in rows}
+    assert by_name["file"]["configured"] is True
+    assert by_name["console"]["configured"] is True
+    assert by_name["discord"]["configured"] is False
+    assert by_name["discord"]["needs"] == "DISCORD_WEBHOOK_URL"
+
+
+def test_pausing_a_channel_round_trips_through_the_store(tmp_path):
+    db = tmp_path / "pause.db"
+    with Store(db) as store:
+        store.init_schema()
+        assert store.is_channel_paused("discord") is False
+        store.set_channel_paused("discord", True)
+
+    rows = dashboard.channel_health(str(db))
+    assert [r["paused"] for r in rows if r["name"] == "discord"] == [True]
+
+    with Store(db) as store:
+        store.set_channel_paused("discord", False)
+    rows = dashboard.channel_health(str(db))
+    assert [r["paused"] for r in rows if r["name"] == "discord"] == [False]

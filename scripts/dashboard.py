@@ -39,6 +39,7 @@ for _extra in (str(_REPO_ROOT / "src"), str(_SCRIPTS_DIR)):
         sys.path.insert(0, _extra)
 
 from latency_report import _STAGES, load_rows, percentile, stage_durations  # noqa: E402
+from tsalert.config import Config  # noqa: E402
 from tsalert.models import parse_iso_datetime  # noqa: E402
 from tsalert.monitor import HealthMonitor  # noqa: E402
 from tsalert.store import Store  # noqa: E402
@@ -278,6 +279,55 @@ def read_metrics(metrics_path: Path) -> list[dict] | None:
     return matches or None
 
 
+# Which channels exist, and what each one needs before it can send. Kept
+# beside the page rather than imported from agent.build_channels because the
+# page has to describe a channel that is switched off, and build_channels
+# deliberately leaves those out of its list.
+_CHANNEL_SPECS = [
+    ("file", "always on", "Append only JSONL on local disk. Cannot fail, needs nothing."),
+    ("console", "always on", "Prints to the agent's stdout."),
+    ("discord", "DISCORD_WEBHOOK_URL", "Primary remote channel. One webhook URL is the whole credential."),
+    ("telegram", "TELEGRAM_BOT_TOKEN + TELEGRAM_CHAT_ID", "Optional second remote channel."),
+]
+
+
+def channel_health(db_path: str) -> list[dict]:
+    """One row per channel: is it set up, is it paused, and how is it doing.
+
+    stats() answers "are alerts going out" in aggregate, which is the wrong
+    question during an outage. The useful question is which channel is
+    failing, because one channel at zero with a queue behind it and every
+    channel failing at once need different responses.
+    """
+    config = Config.from_env()
+    configured = {
+        "file": True,
+        "console": True,
+        "discord": bool(config.discord_webhook_url),
+        "telegram": bool(config.telegram_bot_token and config.telegram_chat_id),
+    }
+    with Store(db_path) as store:
+        counts = store.channel_stats()
+        paused = {name: store.is_channel_paused(name) for name, _, _ in _CHANNEL_SPECS}
+
+    rows = []
+    for name, needs, description in _CHANNEL_SPECS:
+        seen = counts.get(name, {})
+        rows.append({
+            "name": name,
+            "needs": needs,
+            "description": description,
+            "configured": configured[name],
+            "paused": paused[name],
+            "delivered": seen.get("delivered", 0),
+            "queued": seen.get("queued", 0),
+            "failed": seen.get("failed", 0),
+            "given_up": seen.get("given_up", 0),
+            "last_error": seen.get("last_error"),
+        })
+    return rows
+
+
 def build_state(db_path: str, pid_path: Path, metrics_path: Path, ticker_filter: str | None) -> dict:
     with Store(db_path) as store:
         stats = store.stats()
@@ -324,6 +374,7 @@ def build_state(db_path: str, pid_path: Path, metrics_path: Path, ticker_filter:
         "mentions": mentions[:200],
         "tickers": tickers,
         "ticker_filter": ticker_filter,
+        "channels": channel_health(db_path),
         "latency": latency_table(db_path),
         "metrics": read_metrics(metrics_path),
         "server_time": datetime.now(timezone.utc).isoformat(),
@@ -519,6 +570,19 @@ button.primary { background: var(--accent); color: #fff; border-color: var(--acc
 button.primary:hover { filter: brightness(1.08); }
 button:disabled { opacity: 0.5; cursor: not-allowed; }
 button.preset.active { background: var(--accent); color: #fff; border-color: var(--accent); }
+.channel-table { width: 100%; border-collapse: collapse; margin-top: 0.75rem; }
+.channel-table th, .channel-table td { padding: 0.45rem 0.6rem; border-bottom: 1px solid var(--border); text-align: left; }
+.channel-table th.num, .channel-table td.num { text-align: right; font-variant-numeric: tabular-nums; }
+.channel-name { font-weight: 600; }
+.channel-note { color: var(--muted); font-size: 0.85em; }
+.pill { display: inline-block; padding: 0.1rem 0.5rem; border-radius: 999px; font-size: 0.8em; font-weight: 600; }
+.pill.live { background: #d8f5e0; color: #14622f; }
+.pill.paused { background: #fdeccd; color: #7a4a05; }
+.pill.off { background: #eceef1; color: #5a6270; }
+.pill.failing { background: #fbdcdc; color: #8a1c1c; }
+.risk { margin-top: 0.5rem; padding: 0.55rem 0.7rem; border-radius: 6px; border-left: 4px solid; font-size: 0.9em; }
+.risk.caution { background: #fff8e6; border-color: #d79a10; color: #6b4a02; }
+.risk.danger { background: #fdeaea; border-color: #c23030; color: #7d1414; }
 input[type="number"], input[type="text"] {
   font: inherit;
   font-variant-numeric: tabular-nums;
@@ -650,6 +714,21 @@ footer.foot { text-align: center; color: var(--muted); font-size: 0.75rem; margi
 </section>
 
 <section class="card">
+  <h2>Alert channels</h2>
+  <p class="hint">Every stock post is offered to all four. Delivery is tracked per channel, so one
+  being down never holds up another. Pausing takes effect on the next poll and anything missed
+  while a channel is off goes out when it comes back.</p>
+  <table class="channel-table">
+    <thead>
+      <tr><th>Channel</th><th>State</th><th class="num">Sent</th><th class="num">Queued</th>
+      <th class="num">Failed</th><th></th></tr>
+    </thead>
+    <tbody id="channel-rows"></tbody>
+  </table>
+  <div class="inline-message" id="channel-message"></div>
+</section>
+
+<section class="card">
   <h2>Controls</h2>
   <div class="control-grid">
     <div class="control-block">
@@ -670,6 +749,7 @@ footer.foot { text-align: center; color: var(--muted); font-size: 0.75rem; margi
       <input type="number" id="interval-custom" min="10" step="1" value="90">
       <p class="hint" id="interval-guidance">Poll interval controls how often the agent checks for
       new posts. Shorter means faster alerts and more requests.</p>
+      <div class="risk" id="interval-risk" hidden></div>
     </div>
 
     <div class="control-block">
@@ -832,6 +912,95 @@ footer.foot { text-align: center; color: var(--muted); font-size: 0.75rem; margi
     qs("status-timing").textContent = timing;
   }
 
+  function showMessage(id, text, ok) {
+    var msg = qs(id);
+    msg.textContent = text || "";
+    msg.className = "inline-message" + (ok ? "" : " error");
+  }
+
+  function renderChannels(rows) {
+    var tbody = qs("channel-rows");
+    tbody.innerHTML = "";
+    (rows || []).forEach(function (c) {
+      var tr = document.createElement("tr");
+
+      var nameCell = document.createElement("td");
+      var nameEl = document.createElement("div");
+      nameEl.className = "channel-name";
+      nameEl.textContent = c.name;
+      var note = document.createElement("div");
+      note.className = "channel-note";
+      note.textContent = c.configured ? c.description : "needs " + c.needs;
+      nameCell.appendChild(nameEl);
+      nameCell.appendChild(note);
+      tr.appendChild(nameCell);
+
+      // State reads from three separate things, so decide once here rather
+      // than letting the table imply it. A channel can be set up and paused,
+      // or set up and failing, and those are not the same thing.
+      var state = document.createElement("td");
+      var pill = document.createElement("span");
+      if (!c.configured) {
+        pill.className = "pill off";
+        pill.textContent = "not set up";
+      } else if (c.paused) {
+        pill.className = "pill paused";
+        pill.textContent = "paused";
+      } else if (c.failed > 0 || c.queued > 0) {
+        pill.className = "pill failing";
+        pill.textContent = "failing";
+      } else {
+        pill.className = "pill live";
+        pill.textContent = "live";
+      }
+      state.appendChild(pill);
+      if (c.last_error) {
+        var err = document.createElement("div");
+        err.className = "channel-note";
+        err.textContent = c.last_error;
+        state.appendChild(err);
+      }
+      tr.appendChild(state);
+
+      ["delivered", "queued", "failed"].forEach(function (key) {
+        var td = document.createElement("td");
+        td.className = "num";
+        td.textContent = c[key];
+        tr.appendChild(td);
+      });
+
+      var action = document.createElement("td");
+      if (c.configured && c.name !== "file") {
+        // The file sink has no pause button on purpose. It is the record of
+        // what the agent decided, and being able to switch off the audit
+        // trail from a web page is not a feature.
+        var btn = document.createElement("button");
+        btn.type = "button";
+        btn.textContent = c.paused ? "Resume" : "Pause";
+        btn.addEventListener("click", function () {
+          toggleChannel(c.name, !c.paused);
+        });
+        action.appendChild(btn);
+      }
+      tr.appendChild(action);
+      tbody.appendChild(tr);
+    });
+  }
+
+  function toggleChannel(name, paused) {
+    var body = "name=" + encodeURIComponent(name) + "&paused=" + (paused ? "1" : "0");
+    fetch("/channel", {
+      method: "POST",
+      headers: {"Content-Type": "application/x-www-form-urlencoded"},
+      body: body
+    }).then(function (r) { return r.json(); }).then(function (data) {
+      showMessage("channel-message", data.message, data.ok);
+      refresh();
+    }).catch(function () {
+      showMessage("channel-message", "could not reach the dashboard", false);
+    });
+  }
+
   function setStats(s) {
     qs("stat-posts").textContent = s.stats.posts;
     qs("stat-mentions").textContent = s.stats.stock_related;
@@ -955,6 +1124,7 @@ footer.foot { text-align: center; color: var(--muted); font-size: 0.75rem; margi
     setHealth(s);
     setLatency(s);
     setMetrics(s);
+    renderChannels(s.channels);
 
     var startBtn = qs("start-btn");
     var stopBtn = qs("stop-btn");
@@ -988,6 +1158,55 @@ footer.foot { text-align: center; color: var(--muted); font-size: 0.75rem; margi
   function updateIntervalGuidance() {
     var v = parseInt(qs("interval-custom").value, 10) || 90;
     qs("interval-guidance").textContent = "Poll interval controls how often the agent checks for new posts. " + describeInterval(v);
+    showIntervalRisk(v);
+  }
+
+  // Truth Social sits behind Cloudflare and gives no permission for any of
+  // this. The agent already enforces a 2.5 second floor between requests and
+  // refuses past 600 in an hour, so a very short interval here does not
+  // actually produce the request rate it implies, it just runs into those
+  // limits. Worth saying out loud, because the interval box will happily
+  // accept a number that reads as ten times faster and is not.
+  function describeIntervalRisk(seconds) {
+    if (seconds < 6) {
+      return {
+        level: "danger",
+        text: "Below the hourly cap. The agent refuses past 600 requests an hour, which is one "
+            + "every 6 seconds, so requests get held back and the real interval is not what this "
+            + "says. Nothing is gained and the pattern is exactly what bot protection looks for."
+      };
+    }
+    if (seconds < 15) {
+      return {
+        level: "danger",
+        text: "Aggressive. This is unofficial access to a site behind Cloudflare with no "
+            + "permission for it, and a fast, perfectly regular request pattern is the easiest "
+            + "kind to notice. If the fingerprint stops working the agent falls back to the RSS "
+            + "mirror, so you lose latency rather than everything, but recovering means finding "
+            + "a new fingerprint."
+      };
+    }
+    if (seconds < 30) {
+      return {
+        level: "caution",
+        text: "Brisk. Fine for a short demo. For anything left running, 30 seconds or more costs "
+            + "very little latency and asks a lot less of a server nobody agreed to give us."
+      };
+    }
+    return null;
+  }
+
+  function showIntervalRisk(seconds) {
+    var box = qs("interval-risk");
+    var risk = describeIntervalRisk(seconds);
+    if (!risk) {
+      box.hidden = true;
+      box.textContent = "";
+      return;
+    }
+    box.hidden = false;
+    box.className = "risk " + risk.level;
+    box.textContent = risk.text;
   }
 
   function updateBackfillGuidance() {
@@ -1148,6 +1367,7 @@ class DashboardHandler(BaseHTTPRequestHandler):
             "/backfill": self._handle_backfill,
             "/settings": self._handle_settings,
             "/lexicon": self._handle_lexicon,
+            "/channel": self._handle_channel,
         }
         handler = handlers.get(parsed.path)
         if handler is None:
@@ -1165,6 +1385,30 @@ class DashboardHandler(BaseHTTPRequestHandler):
         body = self.rfile.read(length).decode("utf-8") if length else ""
         parsed = parse_qs(body)
         return {k: v[0] for k, v in parsed.items()}
+
+    def _handle_channel(self) -> None:
+        """Pause or resume one channel.
+
+        Written to the store rather than held in the page, because the agent
+        is a separate process. It reads the flag on every dispatch, so this
+        takes effect on the next poll without a restart.
+        """
+        form = self._read_form()
+        name = (form.get("name") or "").strip()
+        known = {spec[0] for spec in _CHANNEL_SPECS}
+        if name not in known:
+            self._send_json(400, {"ok": False, "message": f"unknown channel: {name}"})
+            return
+        paused = form.get("paused") == "1"
+        with Store(self.db_path) as store:
+            store.set_channel_paused(name, paused)
+        word = "paused" if paused else "resumed"
+        note = ""
+        if not paused:
+            # Un-pausing is not just a flag flip from the operator's side:
+            # anything that came in while it was off is still owed.
+            note = " Anything missed while it was off goes out on the next poll."
+        self._send_json(200, {"ok": True, "message": f"{name} {word}.{note}"})
 
     def _handle_start(self) -> None:
         form = self._read_form()

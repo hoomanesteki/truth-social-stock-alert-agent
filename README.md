@@ -12,7 +12,7 @@ flowchart LR
   D --> R["rule detector<br/><i>531 row lookup table</i>"]
   R -->|"candidate,<br/>about 1.3% of posts"| L["LLM confirm<br/><i>Groq</i>"]
   R -->|"no candidate"| X["ignored"]
-  L --> S["alert<br/><i>Telegram + console</i>"]
+  L --> S["alert<br/><i>file, console,<br/>Discord, Telegram</i>"]
   D --> H["health monitor"]
   H -.->|"nothing new<br/>for N hours"| S
 ```
@@ -40,7 +40,7 @@ Every failure below was tested by forcing it, not just handled in principle.
 | Polls succeed but nothing arrives | `no_new_posts` heartbeat fires. State is on disk, so a restart cannot reset the clock |
 | Groq unavailable | The LLM arm falls back to the rule verdict and the agent keeps alerting |
 | Sentiment model fails | The alert goes out without the sentiment line |
-| Telegram down | Console still delivers. One alert probes the channel, the rest of the poll skips it, and they queue for the next poll. Delivery is tracked per channel, so one channel being down cannot hold up another |
+| A remote channel down (Discord or Telegram) | The file sink and console still deliver, so the alert is never lost. One alert probes the failing channel, the rest of the poll skips it, and they queue for the next. Delivery is tracked per channel, so one being down cannot hold up another |
 | Process dies mid delivery | The alert is re-sent on the next poll. The claim is keyed on post and channel, so a restart cannot repeat what already completed. Delivery is at least once, not exactly once |
 | Process dies before detection | The next poll re-checks anything left undetected, so it is still caught |
 | A store full of old posts (a restore, an import, a backfill from before the eligibility flag) | Two gates, not one. Backfilled rows are marked ineligible, and on a live source nothing older than `MAX_ALERT_AGE_HOURS` alerts regardless of the flag. Found this the hard way: a database built before the flag existed re-announced six week old news a batch per poll |
@@ -64,8 +64,18 @@ uv pip install -r requirements.txt
 cp .env.example .env      # then fill in the values you want
 ```
 
-Every credential is optional. With none set, the agent still runs and prints alerts to the
-console.
+Four channels, in delivery order. **file** appends every alert to `data/alerts.jsonl` and
+**console** prints it, both with no setup and no network, so an alert is never lost even when
+every remote channel is down. **discord** is the primary remote channel. **telegram** is an
+optional second.
+
+Every credential is optional. With none set the agent still runs, writing to the file sink and
+the console.
+
+Discord is primary because a webhook URL is the entire credential. A Telegram bot needs a token
+plus a chat id you discover by messaging the bot first, and the token is invalidated the moment
+you regenerate it in BotFather, which fails in a way that looks exactly like the network being
+down. Both of those cost me an afternoon.
 
 Telegram is blocked outright on some networks, including whole countries. If
 `setup_telegram.py` reports that it cannot reach the API, that is a blocked port rather than a
@@ -75,7 +85,8 @@ its Telegram timeout finding out what it already knows, so turn the timeout down
 
 | Variable | Needed for |
 | --- | --- |
-| `TELEGRAM_BOT_TOKEN`, `TELEGRAM_CHAT_ID` | Telegram delivery. Get the token from @BotFather, message your bot once, then run `uv run python scripts/setup_telegram.py` to fill in the chat id |
+| `DISCORD_WEBHOOK_URL` | The primary remote channel. Discord server, Server Settings, Integrations, New Webhook, Copy URL. The URL is the whole credential, so treat it like a password |
+| `TELEGRAM_BOT_TOKEN`, `TELEGRAM_CHAT_ID` | Optional second remote channel. Token from @BotFather, message your bot once, then `uv run python scripts/setup_telegram.py` fills in the chat id |
 | `GROQ_API_KEY` | The LLM detector arm, the labeling helper, and the bonus sentiment line (bullish/bearish/neutral) added to delivered alerts |
 
 ## Running
@@ -116,6 +127,12 @@ One page on `http.server`, no new dependency. It shows:
 - a ticker filterable mentions feed
 - health and latency, reusing `latency_report.py`'s own maths
 - precision, recall and F1 read from `data/eval/metrics.md` when it exists
+- an alert channel panel: which channels are set up, live, paused or failing, with per channel
+  sent/queued/failed counts and a pause button. Pausing is written to the store, so the running
+  agent picks it up on the next poll without a restart, and anything missed while a channel was
+  off goes out when it comes back
+- a warning under the poll interval when the chosen value is aggressive enough to raise the odds
+  of being blocked
 - the ticker lexicon editor
 
 The page renders once, then a small script polls `GET /api/state` every 10 seconds and updates
@@ -178,8 +195,7 @@ The image is 261MB and the default command needs no network, so `docker run --rm
 Truth Social runs a Mastodon fork, so its web client calls
 `/api/v1/accounts/{id}/statuses`: clean JSON, and `min_id` returns only what is new. The
 obstacle is Cloudflare, which 403s both `requests` and `curl`. Impersonating a browser's TLS
-fingerprint gets through, `curl_cffi` set to `safari17_0`. Chrome is still blocked, so that came
-from trial, not from understanding.
+fingerprint gets through, `curl_cffi` set to `safari17_0`. Chrome is still blocked, found by trial.
 
 | Option | Verdict |
 | --- | --- |
@@ -188,10 +204,10 @@ from trial, not from understanding.
 | Headless browser, aggregators | Rejected. Slower and more brittle, no gain over JSON |
 
 It is also the most fragile, resting on a Cloudflare setting I neither control nor get warned
-about, hence the mirror behind it.
+about. Hence the mirror.
 
 **Polling** floats 30 to 60 seconds. Replaying the real posting history gives a median wait of
-21 seconds and a worst case of 71, since the jitter can overshoot the cap. That costs volume: roughly 1,450 requests a day against 316
+21 seconds and a worst case of 71, since the jitter overshoots the cap. That costs volume: roughly 1,450 requests a day against 316
 for the 60 to 300 range I started with. Latency won, and the throttle and hourly cap still
 bound the worst case.
 
@@ -199,18 +215,17 @@ bound the worst case.
 ETFs, and companies he names outside the index. Each row rates its ticker's ambiguity, and
 riskier ones need more context, because *trade* and *economy* are ordinary political words
 here. Context splits into strong (stock, shares, earnings) and weak. Without that split,
-capitals turn ALL and NOW into noise, and so do names like Ball and Progressive.
+capitals turn ALL and NOW into noise, and so do Ball and Progressive.
 
 ## 2. Results
 
-Three facts from the 1,260 post archive shaped everything. No cashtags at all, so `$DJT` is
-implemented but never exercised. 472 posts, 37 percent, carry no text. And all 61 bare `DJT`
-tokens are his sign-off.
+Three facts from the 1,260 post archive shaped everything. No cashtags at all, so `$DJT` is implemented
+but never exercised. 472 posts, 37 percent, carry no text. All 61 bare `DJT` tokens
+are his sign-off.
 
 Mentions are rare enough that a random 150 would find almost none, so the set is stratified:
-candidates (23, every post the rules flagged, labelled completely so precision is exact),
-random (102, reweighted by 3.62 so recall is measurable), and traps (25, lookalikes scored
-separately). Together they hold 15 real mentions.
+candidates (23, every post the rules flagged, so precision is exact), random (102, reweighted by
+3.62 so recall is measurable), and traps (25, lookalikes scored separately). Together, 15 real mentions.
 
 | Arm | Class P / R / F1 | Ticker P / R / F1 | Exact set | Traps |
 | --- | --- | --- | --- | --- |
@@ -221,8 +236,8 @@ separately). Together they hold 15 real mentions.
 Resampling puts the shipping arm's F1 between 0.603 and 1.000. **I optimised for precision:** a
 miss costs one alert, a false alarm costs trust in every alert after it, and at one real
 mention a week a feed that cries wolf gets muted. Both rule false positives are one shape, a
-media outlet cited rather than discussed as a business (Fox News; New York Times and NBC),
-which the LLM arm gets right.
+media outlet cited rather than discussed as a business which the
+LLM arm gets right.
 
 The ticker column is where the arms separate, and not the way the headline suggests. The LLM
 wins the yes/no call and loses on naming the companies: 8 of 15 exact sets against the rules'
@@ -231,58 +246,62 @@ candidates means combined can drop a false positive but never recover a miss, so
 the rules' recall and ticker accuracy while keeping the LLM's precision.
 
 **The labels, and the trade-off.** `gpt-oss-120b` proposed a label per post, a second model
-labelled the same posts independently and agreed with the finished set on 149 of 150, and I
-read all 150 and made the final call. Thirty of them I reviewed blind, without seeing either
-proposal, to check I was reading rather than rubber-stamping.
+labelled the same posts independently and agreed with the finished set on 149 of 150, and I read
+all 150 and made the final call. Thirty I reviewed blind, without seeing either proposal, to
+check I was reading rather than rubber-stamping.
 
 The honest part is the override count: zero. Reviewing a proposal anchors you in a way
 labelling cold does not, and both models come from one family, so their agreeing is weaker
-evidence than two people agreeing. Read the numbers as resting on labels one person checked.
+evidence than two people agreeing. These are labels one person checked.
 One thing is kept clean. The scored LLM arm is `qwen3.6-27b`, the model the agent runs, and it
 never touched the labels. An earlier version scored the labelling model and returned 1.000 on all 150 rows,
 measuring lineage rather than skill. `evaluate.py` now warns when an arm agrees with the labels
 completely. The rule arm predates the labelling entirely.
 
 **Latency** over a 90 poll run: 26, 79 and 154 seconds from post to fetch, then 7.4 ms to
-decide and 0.3 ms to reach the console. The poll interval is the whole budget. Three samples
-only, a fourth at 824 seconds being a cold start.
+decide and 0.3 ms to reach the console. The poll interval is the whole budget. Three samples,
+plus a cold start dropped.
 
 ## 3. Robustness and ethics
 
-In the failure table above, the quiet ones matter most: a changed schema and a stalled poll
+In the failure table, the quiet failures matter most: a changed schema and a stalled poll
 both look like nothing is wrong, so both raise.
 
-Delivery is at least once. A post and channel pair is claimed in sqlite before sending, so
-restarts and repeat polls cannot resend, but a crash between Telegram accepting and that write
-will resend. Telegram has no idempotency key, and a duplicate beats a miss.
+Four channels, and the order is the design. File and console never touch the network, so they
+run first and an alert survives every remote channel failing at once. Discord is primary because a
+webhook URL is the whole credential; a Telegram token dies the moment you regenerate it, then
+fails looking exactly like a network outage. I hit both.
 
-The one bug I would not have found by reasoning came from my own network blocking Telegram.
-Nothing was lost, but every alert in the poll spent the full retry budget alone, four timeouts
-and backoff each, so a poll that should take a second took nearly six minutes. A channel that
-exhausts its budget is down, not flaky, so it is skipped for the rest of the poll and probed
-once, cheaply, on the next. Skipped alerts stay queued rather than counted as failures, since
-spending their budget on sends that never happened would discard them. After: 88 seconds.
+Delivery is at least once: a post and channel pair is claimed in sqlite before sending, so
+restarts cannot resend, but a crash between the channel accepting and that write will. No
+idempotency key is on offer, and a duplicate beats a miss.
 
-Politeness is in code, not a comment promising it: a 2.5 second floor between requests, an
-hourly cap that refuses past 600, `Retry-After` honoured, requests strictly sequential. The cap
-matters most, since backoff stays correct right up until a loop bug turns it into a hammer.
+The bug I would not have found by reasoning came from my own network blocking Telegram. Every
+alert spent the full retry budget alone, four timeouts and backoff each, so a poll that should
+take a second took six minutes. A channel that exhausts its budget is down, not flaky, so it is
+skipped for the rest of the poll and probed once, cheaply, on the next. Skipped alerts stay
+queued rather than counted as failures: spending their budget on sends that never happened would
+discard them. After: 88 seconds.
+
+Politeness is in code, not a comment: a 2.5 second floor between requests, an hourly cap that
+refuses past 600, `Retry-After` honoured, requests sequential. The cap matters most,
+since backoff stays correct right up until a loop bug turns it into a hammer. The dashboard
+warns when a chosen interval is aggressive enough to raise the odds of a block.
 
 This reads public pages with no account and keeps only public post text. The mirror's
 `robots.txt` allows crawling, Truth Social publishes none. Automated access likely conflicts with
 their terms anyway, and impersonating a browser fingerprint works around bot protection, which
-goes past reading a page. Proportionate for a prototype at a request a minute; for real use I
-would want a licensed feed.
+goes past reading a page. Proportionate for a prototype at a request a minute; for real use, a
+licensed feed.
 
 ## 4. Limitations and next steps
 
-Media-only posts are invisible; OCR is the answer. The lexicon caps recall: the S&P 500 and
-eight ETFs, so a foreign or small cap name is unreachable, `TM` for Toyota being the one left
-in the labels. Fifteen positives limit every interval above.
+Media-only posts are invisible; OCR is the fix. The lexicon caps recall: the S&P 500 and eight
+ETFs, so a foreign or small cap name is unreachable. Fifteen positives limit every interval above.
 
 **More accounts** is mostly scheduling now. Sources are per account, posts record which one,
 and dedup keys on the status id; the cursor needed fixing, since one global value let a second
-account overwrite the first. What is left is a priority queue keyed on posting rate, so a busy
-account polls every minute and a quiet one drifts to fifteen.
+account overwrite the first. What is left is a priority queue on posting rate.
 
 **Evaluating in production** without labelling everything: run both arms over live traffic and
 hand-label only where they disagree, putting the effort on the decision boundary. Watch input
@@ -296,7 +315,7 @@ agent.py                  entry point: run, test-alert, health, stats
 src/tsalert/
   sources/                ingestion: the API client, the RSS mirror, failover, shared parser
   detect/                 lexicon and the rule baseline
-  alerts/                 channels, formatting, the delivery dispatcher
+  alerts/                 file, console, discord, telegram, and the dispatcher
   store.py                sqlite: dedup, alert idempotency, state, latency
   reliability.py          retries, adaptive interval, circuit breaker
   runner.py monitor.py    the poll loop and health signals
@@ -305,6 +324,6 @@ src/tsalert/
 scripts/                  backfill, eval set construction, labeling, evaluation, latency,
                           dashboard (bonus: local control panel on http.server)
 data/                     the 45 day archive, the lexicon, the evaluation set
-tests/                    238 tests, offline, against recorded fixtures
+tests/                    264 tests, offline, against recorded fixtures
 ```
 

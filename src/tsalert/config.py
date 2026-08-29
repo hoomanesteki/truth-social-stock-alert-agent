@@ -41,6 +41,12 @@ class Config:
     request_timeout: int = 20
     log_level: str = "INFO"
     log_file: str = "logs/agent.jsonl"
+    # Primary channel. A webhook URL is the whole credential, with no token
+    # to revoke and no chat id to discover, which is why this is primary and
+    # Telegram is the optional second.
+    discord_webhook_url: str = ""
+    # Always on. The channel that cannot go down, and the audit trail.
+    alerts_file: str = "data/alerts.jsonl"
     telegram_bot_token: str = ""
     telegram_chat_id: str = ""
     groq_api_key: str = ""
@@ -72,6 +78,8 @@ class Config:
             log_level=os.environ.get("LOG_LEVEL", d.log_level),
             log_file=os.environ.get("LOG_FILE", d.log_file),
             telegram_bot_token=os.environ.get("TELEGRAM_BOT_TOKEN", d.telegram_bot_token),
+            discord_webhook_url=os.environ.get("DISCORD_WEBHOOK_URL", d.discord_webhook_url),
+            alerts_file=os.environ.get("ALERTS_FILE", d.alerts_file),
             telegram_chat_id=os.environ.get("TELEGRAM_CHAT_ID", d.telegram_chat_id),
             groq_api_key=os.environ.get("GROQ_API_KEY", d.groq_api_key),
             groq_model=os.environ.get("GROQ_MODEL", d.groq_model),

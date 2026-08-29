@@ -76,6 +76,13 @@ class AlertDispatcher:
             # survives a process restart because it lives in the sqlite
             # file rather than in memory. A second dispatch for the same post and
             # channel finds the row already there and skips silently.
+            # Paused is checked before the claim, so pausing a channel
+            # leaves no row at all rather than a pending one. Un-pausing then
+            # picks the post up through recover_undelivered, the same path a
+            # crash before delivery uses, instead of the retry queue filling
+            # with alerts nobody asked to send.
+            if self.store.is_channel_paused(channel.name):
+                continue
             if not self.store.claim_alert(post.id, channel.name):
                 continue
             results.append(
@@ -94,6 +101,8 @@ class AlertDispatcher:
             # occurrence should be delivered, not swallowed by a claim row
             # left over from the first time it fired.
             if channel.name in self._down_channels:
+                continue
+            if self.store.is_channel_paused(channel.name):
                 continue
             ok, attempts, error, permanent = self._send_with_retries(channel, text)
             self._note_channel_health(channel.name, ok, permanent)
@@ -136,6 +145,8 @@ class AlertDispatcher:
             channel = self._find_channel(channel_name)
             if channel is None or not channel.is_configured():
                 continue
+            if self.store.is_channel_paused(channel_name):
+                continue
             loaded = self.store.get_post_with_detection(post_id)
             if loaded is None:
                 continue
@@ -168,6 +179,8 @@ class AlertDispatcher:
         results = []
         for channel in self.channels:
             if not channel.is_configured():
+                continue
+            if self.store.is_channel_paused(channel.name):
                 continue
             for post_id in self.store.undelivered_stock_posts(channel.name):
                 loaded = self.store.get_post_with_detection(post_id)

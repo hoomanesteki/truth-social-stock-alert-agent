@@ -10,6 +10,8 @@ sys.path.insert(0, str(Path(__file__).resolve().parent / "src"))
 
 from tsalert.alerts.base import format_alert
 from tsalert.alerts.console import ConsoleChannel
+from tsalert.alerts.discord import DiscordChannel
+from tsalert.alerts.file_sink import FileChannel
 from tsalert.alerts.dispatcher import AlertDispatcher
 from tsalert.alerts.telegram import TelegramChannel
 from tsalert.config import Config
@@ -52,7 +54,7 @@ _FIXTURE_PATHS = [
 # the decision with no network and no credentials.
 _DEMO_PATHS = [_REPO_ROOT / "tests" / "fixtures" / "demo_statuses.json"]
 
-_REDACTED_FIELDS = {"telegram_bot_token", "groq_api_key"}
+_REDACTED_FIELDS = {"telegram_bot_token", "groq_api_key", "discord_webhook_url"}
 
 
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
@@ -113,14 +115,24 @@ def build_source(source_name: str, config: Config):
 
 
 def build_channels(config: Config) -> list:
-    # ConsoleChannel is unconditional so the demo and any dry run always has
-    # somewhere to see the alert, credentials or not. TelegramChannel is only
-    # added when it reports itself configured, but "configured" only means
-    # both fields are non empty, not that they are actually valid, so a
-    # send can still fail later (wrong chat id, revoked token). That failure
-    # is isolated to telegram by the dispatcher, one bad channel never blocks
-    # another.
-    channels = [ConsoleChannel()]
+    """Channels in delivery order, cheapest and most reliable first.
+
+    Order matters because the dispatcher walks this list per post and a
+    channel that is down costs its timeout before the next one is tried. File
+    and console never touch the network, so putting them first means a remote
+    channel being unreachable delays the remote alert and nothing else.
+
+    "Configured" throughout means the credential fields are non empty, not
+    that they work. A revoked Telegram token and a deleted Discord webhook
+    both look configured and fail on send, which is the dispatcher's problem
+    and is isolated per channel.
+    """
+    # Never fails, needs nothing, and keeps the record when every remote
+    # channel is down. First in the list for exactly that reason.
+    channels = [FileChannel(config.alerts_file), ConsoleChannel()]
+    discord = DiscordChannel(config.discord_webhook_url, timeout=config.request_timeout)
+    if discord.is_configured():
+        channels.append(discord)
     # REQUEST_TIMEOUT reached the source but not the channel, so the Telegram
     # timeout was stuck at its own default however it was configured. That is
     # the number that sets what an unreachable channel costs: four attempts at
@@ -191,7 +203,11 @@ def print_active_channels(channels: list, config: Config | None = None) -> None:
     # value in .env, and the only symptom is a channel quietly not being
     # there. That is the documented way to turn Telegram off, so the fix is
     # to make it visible, not to override it.
-    if not any(c.name == "telegram" for c in channels):
+    live = {c.name for c in channels}
+    if "discord" not in live and not config.discord_webhook_url:
+        print("  discord is off: DISCORD_WEBHOOK_URL empty. This is the primary "
+              "remote channel, see the README for the 30 second setup.")
+    if "telegram" not in live:
         missing = [
             name
             for name, value in (("TELEGRAM_BOT_TOKEN", config.telegram_bot_token),

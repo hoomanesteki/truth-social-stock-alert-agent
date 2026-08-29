@@ -226,4 +226,7 @@ data/*.db-shm
 # data/eval/ is committed on purpose, since it makes the scores reproducible
 # without an API key.
 data/llm_detector_cache.jsonl
+# The file sink's output. It is a record of what this machine's agent did,
+# so it differs per run and is not worth versioning.
+data/alerts.jsonl
 logs/*.jsonl
