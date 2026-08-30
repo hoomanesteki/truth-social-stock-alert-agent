@@ -584,17 +584,25 @@ _PAGE_TEMPLATE = r"""<!doctype html>
   --border: rgba(0, 0, 0, 0.08);
   --border-strong: rgba(0, 0, 0, 0.14);
   --text: #1d1d1f;
-  --muted: #6e6e73;
-  --faint: #a1a1a6;
+  /* Was #6e6e73, which measured 4.46 against the tile background and so sat
+     just under the 4.5 needed for body text. This is the same grey a step
+     darker. */
+  --muted: #65656a;
   --accent: #0071e3;
   --accent-hover: #0077ed;
   --accent-weak: rgba(0, 113, 227, 0.1);
+  /* Two variants each. The system colours are fills, tuned to sit behind
+     things, and using one as text on its own tint measured about 2:1. The
+     -text variants are what the state pills use. */
   --green: #34c759;
   --green-weak: rgba(52, 199, 89, 0.14);
+  --green-text: #146c2e;
   --amber: #ff9f0a;
   --amber-weak: rgba(255, 159, 10, 0.14);
+  --amber-text: #7a4800;
   --red: #ff3b30;
   --red-weak: rgba(255, 59, 48, 0.12);
+  --red-text: #9f1f18;
   --grey: #8e8e93;
   --amber-bg: rgba(255, 159, 10, 0.12);
   --radius: 18px;
@@ -615,16 +623,18 @@ _PAGE_TEMPLATE = r"""<!doctype html>
     --border-strong: rgba(255, 255, 255, 0.18);
     --text: #f5f5f7;
     --muted: #98989d;
-    --faint: #636366;
     --accent: #0a84ff;
     --accent-hover: #409cff;
     --accent-weak: rgba(10, 132, 255, 0.18);
     --green: #30d158;
     --green-weak: rgba(48, 209, 88, 0.18);
+    --green-text: #6ee7a0;
     --amber: #ff9f0a;
     --amber-weak: rgba(255, 159, 10, 0.18);
+    --amber-text: #fcd34d;
     --red: #ff453a;
     --red-weak: rgba(255, 69, 58, 0.18);
+    --red-text: #ffa39c;
     --amber-bg: rgba(255, 159, 10, 0.16);
     --shadow: 0 1px 2px rgba(0,0,0,0.5), 0 8px 24px rgba(0,0,0,0.4);
     --shadow-lift: 0 2px 6px rgba(0,0,0,0.6), 0 16px 40px rgba(0,0,0,0.5);
@@ -814,7 +824,7 @@ button.primary {
   font-weight: 600;
 }
 button.primary:hover:not(:disabled) { background: var(--accent-hover); border-color: var(--accent-hover); }
-button.danger { color: var(--red); border-color: var(--red-weak); }
+button.danger { color: var(--red-text); border-color: var(--red-weak); }
 button.danger:hover:not(:disabled) { background: var(--red-weak); border-color: var(--red); }
 button:disabled { opacity: 0.4; cursor: not-allowed; }
 button.preset.active { background: var(--accent); color: #fff; border-color: var(--accent); font-weight: 600; }
@@ -845,10 +855,10 @@ button.preset.active { background: var(--accent); color: #fff; border-color: var
 .channel-name { font-weight: 600; }
 .channel-note { color: var(--muted); font-size: 0.85em; }
 .pill { display: inline-block; padding: 0.15rem 0.6rem; border-radius: 999px; font-size: 0.78em; font-weight: 600; letter-spacing: -0.005em; }
-.pill.live { background: var(--green-weak); color: var(--green); }
-.pill.paused { background: var(--amber-weak); color: var(--amber); }
+.pill.live { background: var(--green-weak); color: var(--green-text); }
+.pill.paused { background: var(--amber-weak); color: var(--amber-text); }
 .pill.off { background: var(--surface-2); color: var(--muted); }
-.pill.failing { background: var(--red-weak); color: var(--red); }
+.pill.failing { background: var(--red-weak); color: var(--red-text); }
 .risk { margin-top: 0.5rem; padding: 0.55rem 0.7rem; border-radius: 6px; border-left: 4px solid; font-size: 0.9em; }
 .risk.caution { background: var(--amber-weak); border-color: var(--amber); color: var(--text); }
 .risk.danger { background: var(--red-weak); border-color: var(--red); color: var(--text); }
@@ -983,7 +993,7 @@ footer.foot { text-align: center; color: var(--muted); font-size: 0.75rem; margi
 </header>
 
 <section class="card">
-  <div class="hero-top">
+  <div class="hero-top" role="status" aria-live="polite">
     <span class="dot" id="status-dot"></span>
     <span class="status-word" id="status-word">-</span>
     <span class="status-timing" id="status-timing"></span>
@@ -1018,7 +1028,7 @@ footer.foot { text-align: center; color: var(--muted); font-size: 0.75rem; margi
     </thead>
     <tbody id="channel-rows"></tbody>
   </table>
-  <div class="inline-message" id="channel-message"></div>
+  <div class="inline-message" id="channel-message" role="status" aria-live="polite"></div>
 </section>
 
 <section class="card">
@@ -1031,7 +1041,7 @@ footer.foot { text-align: center; color: var(--muted); font-size: 0.75rem; margi
       </div>
       <p class="hint">Start launches the crawler in the background with the interval below. Stop
       sends it a termination signal and waits briefly for it to exit.</p>
-      <div class="inline-message" id="control-message"></div>
+      <div class="inline-message" id="control-message" role="status" aria-live="polite"></div>
 
       <div class="btn-row" id="interval-buttons" style="margin-top:0.5rem;">
         <button class="preset" type="button" data-interval="60">60s Fast</button>
@@ -1039,10 +1049,11 @@ footer.foot { text-align: center; color: var(--muted); font-size: 0.75rem; margi
         <button class="preset" type="button" data-interval="180">180s Relaxed</button>
         <button class="preset" type="button" data-interval="300">300s Quiet</button>
       </div>
-      <input type="number" id="interval-custom" min="10" step="1" value="90">
+      <input type="number" id="interval-custom" min="10" max="86400" step="1" value="90"
+             aria-label="Poll interval in seconds" aria-describedby="interval-guidance">
       <p class="hint" id="interval-guidance">Poll interval controls how often the agent checks for
       new posts. Shorter means faster alerts and more requests.</p>
-      <div class="risk" id="interval-risk" hidden></div>
+      <div class="risk" id="interval-risk" role="status" aria-live="polite" hidden></div>
     </div>
 
     <div class="control-block">
@@ -1052,11 +1063,12 @@ footer.foot { text-align: center; color: var(--muted); font-size: 0.75rem; margi
         <button class="preset" type="button" data-days="45">45 days</button>
         <button class="preset" type="button" data-days="90">90 days</button>
       </div>
-      <input type="number" id="backfill-custom" min="1" step="1" value="45">
+      <input type="number" id="backfill-custom" min="1" max="3650" step="1" value="45"
+             aria-label="Backfill window in days" aria-describedby="backfill-guidance">
       <button id="backfill-run-btn" type="button">Run backfill</button>
       <p class="hint" id="backfill-guidance">Backfill walks the public archive for the chosen
       window and fills in older posts. It runs in the background and does not block this page.</p>
-      <div class="inline-message" id="backfill-message"></div>
+      <div class="inline-message" id="backfill-message" role="status" aria-live="polite"></div>
     </div>
   </div>
 </section>
