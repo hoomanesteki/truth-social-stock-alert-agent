@@ -849,7 +849,11 @@ button.preset.active { background: var(--accent); color: #fff; border-color: var
   border-left: 3px solid var(--amber);
   font-size: 0.85rem;
 }
-.channel-table { width: 100%; border-collapse: collapse; margin-top: 0.75rem; }
+/* Six columns do not fit a phone. Scroll the table rather than let it push
+   the whole page sideways, which is the failure that makes every other
+   column unreadable too. */
+.table-scroll { overflow-x: auto; -webkit-overflow-scrolling: touch; margin-top: 0.75rem; }
+.channel-table { width: 100%; border-collapse: collapse; min-width: 30rem; }
 .channel-table th, .channel-table td { padding: 0.45rem 0.6rem; border-bottom: 1px solid var(--border); text-align: left; }
 .channel-table th.num, .channel-table td.num { text-align: right; font-variant-numeric: tabular-nums; }
 .channel-name { font-weight: 600; }
@@ -1021,6 +1025,7 @@ footer.foot { text-align: center; color: var(--muted); font-size: 0.75rem; margi
   <p class="hint">Every stock post is offered to all four. Delivery is tracked per channel, so one
   being down never holds up another. Pausing takes effect on the next poll and anything missed
   while a channel is off goes out when it comes back.</p>
+  <div class="table-scroll">
   <table class="channel-table">
     <thead>
       <tr><th>Channel</th><th>State</th><th class="num">Sent</th><th class="num">Queued</th>
@@ -1028,6 +1033,7 @@ footer.foot { text-align: center; color: var(--muted); font-size: 0.75rem; margi
     </thead>
     <tbody id="channel-rows"></tbody>
   </table>
+  </div>
   <div class="inline-message" id="channel-message" role="status" aria-live="polite"></div>
 </section>
 

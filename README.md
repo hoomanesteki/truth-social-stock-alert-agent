@@ -135,7 +135,8 @@ One page on `http.server`, no new dependency. It shows:
   running agent picks it up on the next poll without a restart, and anything missed while a
   channel was off goes out when it comes back, bounded by the same age gate live alerts use
 - a warning under the poll interval when the chosen value is aggressive enough to raise the odds
-  of being blocked
+  of being blocked, including the case where it is below the hourly cap and so is not the
+  interval it claims to be
 - the ticker lexicon editor
 
 The page renders once, then a small script polls `GET /api/state` every 10 seconds and updates
