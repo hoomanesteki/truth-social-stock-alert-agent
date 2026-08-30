@@ -11,6 +11,12 @@ from tsalert.sources.base import SourceHealth, TransientSourceError
 from tsalert.sources.failover import FailoverSource
 
 
+def no_sleep(_seconds: float) -> None:
+    """The failover retries the primary internally now, so without this the
+    suite spends real seconds backing off."""
+
+
+
 def _post(post_id: str) -> Post:
     now = datetime(2026, 8, 25, tzinfo=timezone.utc)
     return Post(
@@ -52,7 +58,7 @@ class FakeSource:
 def test_primary_success_stays_on_primary():
     primary = FakeSource("primary", posts=[_post("1")])
     fallback = FakeSource("fallback", posts=[_post("2")])
-    failover = FailoverSource(primary, fallback)
+    failover = FailoverSource(primary, fallback, sleep=no_sleep)
 
     posts = failover.fetch_latest()
 
@@ -65,7 +71,7 @@ def test_single_failure_below_threshold_propagates_and_stays_on_primary():
     primary = FakeSource("primary", raises=TransientSourceError("boom"))
     fallback = FakeSource("fallback", posts=[_post("2")])
     breaker = CircuitBreaker(threshold=3, cooldown_seconds=300, clock=lambda: 0.0)
-    failover = FailoverSource(primary, fallback, breaker=breaker)
+    failover = FailoverSource(primary, fallback, breaker=breaker, sleep=no_sleep)
 
     with pytest.raises(TransientSourceError):
         failover.fetch_latest()
@@ -78,7 +84,7 @@ def test_primary_failure_falls_through_to_fallback_once_breaker_opens(caplog):
     primary = FakeSource("primary", raises=TransientSourceError("boom"))
     fallback = FakeSource("fallback", posts=[_post("2")])
     breaker = CircuitBreaker(threshold=2, cooldown_seconds=300, clock=lambda: 0.0)
-    failover = FailoverSource(primary, fallback, breaker=breaker)
+    failover = FailoverSource(primary, fallback, breaker=breaker, sleep=no_sleep)
 
     with pytest.raises(TransientSourceError):
         failover.fetch_latest()
@@ -101,7 +107,7 @@ def test_primary_retried_and_recovers_after_cooldown():
     fallback = FakeSource("fallback", posts=[_post("2")])
     clock = {"t": 0.0}
     breaker = CircuitBreaker(threshold=1, cooldown_seconds=100, clock=lambda: clock["t"])
-    failover = FailoverSource(primary, fallback, breaker=breaker)
+    failover = FailoverSource(primary, fallback, breaker=breaker, sleep=no_sleep)
 
     # threshold=1: the first failure trips the breaker open immediately, and
     # this same call is served from fallback rather than raised to the caller.
@@ -126,3 +132,26 @@ def test_primary_retried_and_recovers_after_cooldown():
     assert posts == primary.posts
     assert failover.active_source_name == "primary"
     assert failover.last_transition.to_source == "primary"
+
+
+def test_the_breaker_counts_polls_not_retry_attempts():
+    """One blip must not demote ingestion to the mirror.
+
+    The runner used to wrap this source in with_retries(attempts=3), and
+    every attempt re-entered _call and ticked the breaker, so a single poll
+    spent the whole threshold and failed over inside it. A six second network
+    hiccup then cost the full cooldown on the slower mirror, and the
+    documented "three consecutive failures" meant three retries rather than
+    the three polls it reads as. Retrying inside this class restores that.
+    """
+    primary = FakeSource("truthsocial_api", raises=TransientSourceError("blip"))
+    fallback = FakeSource("trumpstruth_rss", posts=[_post("1")])
+    failover = FailoverSource(primary, fallback, sleep=no_sleep)
+
+    for _ in range(2):
+        with pytest.raises(TransientSourceError):
+            failover.fetch_latest()
+        assert failover.active_source_name == primary.name
+
+    assert failover.fetch_latest()[0].id == "1"
+    assert failover.active_source_name == fallback.name

@@ -32,7 +32,14 @@ class FixtureSource:
             threshold = id_sort_key(since_id)
             posts = [p for p in posts if id_sort_key(p.id) > threshold]
         self._last_success = datetime.now(timezone.utc)
-        return posts[-limit:] if limit else posts
+        # Oldest slice, not newest, for the same reason the RSS mirror takes
+        # one: this source hands back everything at once, so taking the
+        # newest limit under a backlog advances the cursor past the oldest
+        # ones and the next poll's since_id filter then excludes them
+        # forever. With 40 recorded posts and limit=20, poll one returned
+        # the newest 20 and poll two returned nothing: half the corpus was
+        # silently never ingested.
+        return posts[:limit] if limit else posts
 
     def fetch_history(self, before_id: str | None = None, limit: int = 20) -> list[Post]:
         posts = self._posts

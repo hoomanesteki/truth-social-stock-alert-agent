@@ -164,12 +164,24 @@ class TrumpsTruthRssSource:
             self.skipped_missing_id_count += 1
             logger.warning("RSS item missing truth:originalId, skipping")
             return None
+        original_id = original_id.strip()
+        if not original_id.isdigit():
+            # Truth Social ids are numeric snowflakes, and this mirror filters
+            # since_id on the client, so a non-numeric id is not merely odd:
+            # id_sort_key ranks non-numeric above every numeric id, so the
+            # moment one became last_seen_post_id the filter excluded every
+            # real post after it. The cursor lives in the store, so a restart
+            # did not clear it either. Ingestion from the mirror stopped dead
+            # and stayed stopped.
+            self.skipped_missing_id_count += 1
+            logger.warning("RSS item has a non numeric id (%r), skipping", original_id)
+            return None
         original_url = item.findtext("truth:originalUrl", namespaces=_TRUTH_NS) or ""
         description = item.findtext("description") or ""
         created_at = self._parse_pub_date(item.findtext("pubDate"))
 
         return Post(
-            id=original_id.strip(),
+            id=original_id,
             account=self.account,
             created_at=created_at,
             text=html_to_text(description),

@@ -42,17 +42,33 @@ from latency_report import _STAGES, load_rows, percentile, stage_durations  # no
 from tsalert.config import Config  # noqa: E402
 from tsalert.models import parse_iso_datetime  # noqa: E402
 from tsalert.monitor import HealthMonitor  # noqa: E402
+from tsalert.sources.rss_mirror import TrumpsTruthRssSource  # noqa: E402
+from tsalert.sources.truthsocial import TruthSocialApiSource  # noqa: E402
 from tsalert.store import Store  # noqa: E402
 
 _DEFAULT_DB = "data/agent.db"
 _DEFAULT_LEXICON = _REPO_ROOT / "data" / "lexicon" / "tickers.csv"
 _DEFAULT_PID = _REPO_ROOT / "data" / "agent.pid"
+_DEFAULT_BACKFILL_PID = _REPO_ROOT / "data" / "backfill.pid"
 _DEFAULT_METRICS = _REPO_ROOT / "data" / "eval" / "metrics.md"
 _AGENT_SCRIPT = _REPO_ROOT / "agent.py"
 _BACKFILL_SCRIPT = _REPO_ROOT / "scripts" / "backfill.py"
 _LEXICON_HEADER = ["ticker", "company", "aliases", "ambiguity", "ambiguous_aliases", "kind", "notes"]
 _TEXT_PREVIEW_CHARS = 200
 _DEFAULT_INTERVAL_SECONDS = 90
+# Both ends of the poll interval, enforced on the server. The number input's
+# min attribute is a client hint and nothing more. Without an upper bound a
+# pasted number reached timedelta() in build_state and time.sleep() in the
+# agent, and both raise OverflowError past their limits: the page died with
+# no response at all, the bad value was already persisted so restarting the
+# dashboard did not help, and Stop was unreachable because the page was gone.
+_MIN_INTERVAL_SECONDS = 10
+_MAX_INTERVAL_SECONDS = 86400  # a day. Anything slower is not monitoring.
+
+
+def _clamp_interval(value: object, default: int) -> int:
+    return max(_MIN_INTERVAL_SECONDS, min(_MAX_INTERVAL_SECONDS, _parse_int(value, default)))
+_MAX_BACKFILL_DAYS = 3650  # ten years, well past anything the archive holds
 _DEFAULT_BACKFILL_DAYS = 45
 _STOP_WAIT_SECONDS = 2.0
 
@@ -101,6 +117,14 @@ def _json_for_script(data: object) -> str:
 
 
 def is_running(pid: int) -> bool:
+    # Only a real, individually addressable process id. 0 means "every
+    # process in my own group" and -1 means "every process I am allowed to
+    # signal", and both of those answer os.kill(pid, 0) with success, so a
+    # pid file holding 0 made the page report RUNNING and then made Stop
+    # SIGTERM the dashboard itself. Negative values below -1 are process
+    # groups, which is not what this file ever holds.
+    if pid <= 0:
+        return False
     # Reap first. An agent we spawned that has already exited stays a zombie
     # until someone waits on it, and os.kill succeeds on a zombie, so without
     # this the page reports RUNNING for a process that is dead and also
@@ -109,12 +133,17 @@ def is_running(pid: int) -> bool:
         reaped, _ = os.waitpid(pid, os.WNOHANG)
         if reaped == pid:
             return False
-    except (ChildProcessError, OSError):
+    except (ChildProcessError, OSError, OverflowError):
+        # OverflowError: a pid too large for the platform's pid_t. read_pid
+        # checks the format but not the range, and an unhandled exception
+        # here takes the whole page down rather than one control.
         pass
 
     try:
         os.kill(pid, 0)
     except ProcessLookupError:
+        return False
+    except OverflowError:
         return False
     except PermissionError:
         # The pid exists but is owned by another user. Still alive.
@@ -144,6 +173,32 @@ def write_pid(pid_path: Path, pid: int) -> None:
 
 def clear_pid(pid_path: Path) -> None:
     pid_path.unlink(missing_ok=True)
+
+
+def looks_like_our_agent(pid: int) -> bool:
+    """Is this pid actually the agent, or has the number been reused?
+
+    A pid file outlives the process it names, and pids get reused. Without
+    this check, Stop sent SIGTERM to whatever now holds that number: I put a
+    live unrelated process's pid in the file and the page cheerfully killed
+    it, reporting success.
+
+    Reads the command line rather than trusting the file. Anything that
+    cannot be determined is treated as "not ours", because refusing to stop
+    is recoverable and killing a stranger is not.
+    """
+    if pid <= 0:
+        return False
+    try:
+        out = subprocess.run(
+            ["ps", "-p", str(pid), "-o", "command="],
+            capture_output=True, text=True, timeout=5,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return False
+    if out.returncode != 0:
+        return False
+    return _AGENT_SCRIPT.name in out.stdout
 
 
 def process_status(pid_path: Path) -> tuple[bool, int | None]:
@@ -359,11 +414,48 @@ def ingestion_state(store: Store) -> dict:
             transition = json.loads(raw)
         except json.JSONDecodeError:
             transition = None
+    active = store.get_state("active_source") or ""
+    detail = store.get_state("source_detail") or ""
+
+    # The roster is built here, from the source classes' own name attributes,
+    # and handed to the page ready to render. The first version hard coded
+    # "truthsocial" and "rss" in the JavaScript while the classes actually
+    # call themselves truthsocial_api and trumpstruth_rss, so no card ever
+    # matched: nothing showed as live, the live error text was unreachable,
+    # and a real mirror run rendered as "Replay". Naming things in two places
+    # is what made that possible, so now there is one place.
+    sources = [
+        {
+            "key": TruthSocialApiSource.name,
+            "role": "Primary",
+            "who": "Truth Social JSON",
+            "note": "Mastodon endpoint behind Cloudflare. Fast, and the fragile one.",
+        },
+        {
+            "key": TrumpsTruthRssSource.name,
+            "role": "Fallback",
+            "who": "trumpstruth.org RSS",
+            "note": "Takes over once the breaker opens on the primary.",
+        },
+    ]
+    known = {src["key"] for src in sources}
+    if active and active not in known:
+        # A replay run (--source demo or fixture) is neither of the two.
+        sources.insert(0, {
+            "key": active,
+            "role": "Replay",
+            "who": active,
+            "note": "recorded posts, no network",
+        })
+    for src in sources:
+        src["active"] = src["key"] == active
+
     return {
-        "active": store.get_state("active_source") or "",
-        "detail": store.get_state("source_detail") or "",
+        "active": active,
+        "detail": detail,
         "ok": store.get_state("source_ok") == "1",
         "last_transition": transition,
+        "sources": sources,
     }
 
 
@@ -373,7 +465,12 @@ def build_state(db_path: str, pid_path: Path, metrics_path: Path, ticker_filter:
         monitor = HealthMonitor(store)
         health = monitor.status()
         alarms = active_alarms(monitor)
-        interval = _int_or(store.get_state("poll_interval_seconds"), _DEFAULT_INTERVAL_SECONDS)
+        # Clamped on read as well as on write, so a value stored by an older
+        # build cannot keep the page dead.
+        interval = max(_MIN_INTERVAL_SECONDS, min(
+            _MAX_INTERVAL_SECONDS,
+            _int_or(store.get_state("poll_interval_seconds"), _DEFAULT_INTERVAL_SECONDS),
+        ))
         ingestion = ingestion_state(store)
         backfill_days = _int_or(store.get_state("backfill_days"), _DEFAULT_BACKFILL_DAYS)
 
@@ -423,13 +520,41 @@ def build_state(db_path: str, pid_path: Path, metrics_path: Path, ticker_filter:
 
 
 def validate_lexicon_csv(text: str) -> str | None:
-    """Return an error message, or None when the header row is well formed."""
+    """Return an error message, or None when the table is safe to save.
+
+    Checking the header alone was not enough. A correct header with no rows
+    under it saved cleanly, reported "Saved.", and left the detector with an
+    empty lexicon: every alias and bare ticker match gone, only cashtags
+    still firing, and nothing said so until posts stopped being detected. The
+    row checks below are the difference between rejecting a paste that went
+    wrong and silently disarming detection.
+    """
     lines = text.splitlines()
     if not lines:
         return "empty file"
-    header = next(csv.reader([lines[0]]))
+    try:
+        rows = list(csv.reader(lines))
+    except csv.Error as exc:
+        return f"could not be read as CSV: {exc}"
+    header = rows[0]
     if header != _LEXICON_HEADER:
         return "header row must be exactly: " + ",".join(_LEXICON_HEADER)
+
+    body = [row for row in rows[1:] if row and any(cell.strip() for cell in row)]
+    if not body:
+        return "no rows under the header, which would leave the detector with nothing to match"
+    seen = set()
+    for number, row in enumerate(body, start=2):
+        if len(row) != len(_LEXICON_HEADER):
+            return f"line {number} has {len(row)} columns, expected {len(_LEXICON_HEADER)}"
+        ticker = row[0].strip().upper()
+        if not ticker:
+            return f"line {number} has no ticker"
+        if ticker in seen:
+            return f"line {number} repeats ticker {ticker}"
+        seen.add(ticker)
+        if not row[1].strip():
+            return f"line {number} ({ticker}) has no company name"
     return None
 
 
@@ -874,7 +999,7 @@ footer.foot { text-align: center; color: var(--muted); font-size: 0.75rem; margi
 <section class="card">
   <h2>Ingestion</h2>
   <p class="hint">Where posts are coming from right now. The primary is the JSON endpoint behind
-  Cloudflare, which is the fast path and the fragile one. After three consecutive failures the
+  Cloudflare, which is the fast path and the fragile one. After three consecutive failed polls the
   circuit breaker opens and the RSS mirror takes over, then the primary is probed again after a
   cooldown. Both return the same status ids, so a switch cannot re-alert a post.</p>
   <div class="source-row" id="source-row"></div>
@@ -1215,21 +1340,30 @@ footer.foot { text-align: center; color: var(--muted); font-size: 0.75rem; margi
     var row = qs("source-row");
     row.innerHTML = "";
 
-    // Named here rather than read from the agent, because the page has to
-    // describe both sources even before the agent has ever run.
-    var sources = [
-      {key: "truthsocial", role: "Primary", who: "Truth Social JSON",
-       note: "Mastodon endpoint behind Cloudflare. Fast, and the fragile one."},
-      {key: "rss", role: "Fallback", who: "trumpstruth.org RSS",
-       note: "Takes over after three consecutive primary failures."}
-    ];
+    // Everything here comes from the server, including which source is
+    // active. The page used to carry its own copy of the source names and
+    // they did not match the ones the code actually uses, so no card was
+    // ever marked live.
+    var sources = ing.sources || [];
+    var agentRunning = s.status !== "STOPPED";
+
     sources.forEach(function (src) {
       var card = document.createElement("div");
-      card.className = "source-card" + (ing.active === src.key ? " active" : "");
+      // Live is only live while the agent is actually up. The recorded
+      // source outlives the process that wrote it, so without this the panel
+      // announced a source as live under a big STOPPED header.
+      var live = src.active && agentRunning;
+      card.className = "source-card" + (live ? " active" : "");
 
       var role = document.createElement("div");
       role.className = "role";
-      role.textContent = ing.active === src.key ? src.role + " - live now" : src.role;
+      if (live) {
+        role.textContent = src.role + " - live now";
+      } else if (src.active) {
+        role.textContent = src.role + " - last used";
+      } else {
+        role.textContent = src.role;
+      }
 
       var who = document.createElement("div");
       who.className = "who";
@@ -1239,7 +1373,7 @@ footer.foot { text-align: center; color: var(--muted); font-size: 0.75rem; margi
       detail.className = "detail";
       if (!ing.active) {
         detail.textContent = "not polling yet";
-      } else if (ing.active === src.key) {
+      } else if (src.active) {
         detail.textContent = ing.detail || (ing.ok ? "ok" : "no successful fetch yet");
       } else {
         detail.textContent = src.note;
@@ -1251,27 +1385,6 @@ footer.foot { text-align: center; color: var(--muted); font-size: 0.75rem; margi
       row.appendChild(card);
     });
 
-    // A replay run (--source demo or fixture) is neither of the two, and
-    // showing both as idle would read as "nothing is happening" when
-    // something clearly is.
-    if (ing.active && ing.active !== "truthsocial" && ing.active !== "rss") {
-      var replay = document.createElement("div");
-      replay.className = "source-card active";
-      var r1 = document.createElement("div");
-      r1.className = "role";
-      r1.textContent = "Replay - live now";
-      var r2 = document.createElement("div");
-      r2.className = "who";
-      r2.textContent = ing.active;
-      var r3 = document.createElement("div");
-      r3.className = "detail";
-      r3.textContent = ing.detail || "recorded posts, no network";
-      replay.appendChild(r1);
-      replay.appendChild(r2);
-      replay.appendChild(r3);
-      row.insertBefore(replay, row.firstChild);
-    }
-
     var box = qs("source-transition");
     var t = ing.last_transition;
     if (!t) {
@@ -1280,7 +1393,7 @@ footer.foot { text-align: center; color: var(--muted); font-size: 0.75rem; margi
       return;
     }
     box.hidden = false;
-    // t.from is a reserved word in older parsers, so bracket access.
+    // "from" is a reserved word in some parsers, so bracket access.
     box.textContent = "Switched " + t["from"] + " to " + t["to"] + " " +
       fmtAgo(t.at) + ". Reason: " + t.reason;
   }
@@ -1580,7 +1693,13 @@ def render_page(state: dict) -> str:
 # ---------------------------------------------------------------------------
 
 
-def _parse_int(value: object, default: int) -> int:
+def _parse_int(value: object, default):
+    """int(value), or default when it is not a number.
+
+    default is deliberately untyped: passing None is how callers ask
+    "was this even a number?" so they can tell a typo apart from a value
+    that was simply out of range.
+    """
     try:
         return int(str(value))
     except (TypeError, ValueError):
@@ -1601,6 +1720,10 @@ class DashboardHandler(BaseHTTPRequestHandler):
     db_path: str = _DEFAULT_DB
     lexicon_path: Path = _DEFAULT_LEXICON
     pid_path: Path = _DEFAULT_PID
+    # Separate file from the agent's. A backfill is a different process with
+    # a different lifetime, and sharing one pid file would let Stop kill a
+    # backfill or a backfill guard block Start.
+    backfill_pid_path: Path = _DEFAULT_BACKFILL_PID
     metrics_path: Path = _DEFAULT_METRICS
     # Injected in tests so nothing here ever spawns the real agent.
     spawn_fn = staticmethod(subprocess.Popen)
@@ -1699,7 +1822,7 @@ class DashboardHandler(BaseHTTPRequestHandler):
             return
 
         default_interval = _get_setting_int(self.db_path, "poll_interval_seconds", _DEFAULT_INTERVAL_SECONDS)
-        interval = max(10, _parse_int(form.get("interval"), default_interval))
+        interval = _clamp_interval(form.get("interval"), default_interval)
         _save_setting(self.db_path, "poll_interval_seconds", str(interval))
 
         env = dict(os.environ)
@@ -1725,9 +1848,20 @@ class DashboardHandler(BaseHTTPRequestHandler):
             clear_pid(self.pid_path)
             self._send_json(200, {"ok": False, "message": "not running"})
             return
+        if not looks_like_our_agent(pid):
+            # The pid is live but is not the agent, so the number has been
+            # reused since the file was written. Clear the stale file and
+            # refuse rather than signalling a process we did not start.
+            clear_pid(self.pid_path)
+            self._send_json(200, {
+                "ok": False,
+                "message": (f"pid {pid} is not the agent, so it was not signalled. "
+                            "The stale pid file has been cleared."),
+            })
+            return
         try:
             os.kill(pid, signal.SIGTERM)
-        except ProcessLookupError:
+        except (ProcessLookupError, OverflowError):
             pass
         deadline = time.monotonic() + _STOP_WAIT_SECONDS
         while time.monotonic() < deadline and is_running(pid):
@@ -1738,7 +1872,23 @@ class DashboardHandler(BaseHTTPRequestHandler):
     def _handle_backfill(self) -> None:
         form = self._read_form()
         default_days = _get_setting_int(self.db_path, "backfill_days", _DEFAULT_BACKFILL_DAYS)
-        days = max(1, _parse_int(form.get("days"), default_days))
+        days = max(1, min(_MAX_BACKFILL_DAYS, _parse_int(form.get("days"), default_days)))
+
+        # One at a time. Every click used to spawn another backfill, and they
+        # all share the same paging cursor in agent_state, each reading it
+        # once at startup and then overwriting it per page. Concurrent runs
+        # interleaved each other's paging, so history came back duplicated
+        # and with gaps, and the request rate against Truth Social multiplied
+        # by however many times the button had been pressed, which is exactly
+        # what the 2.5 second floor exists to prevent.
+        existing = read_pid(self.backfill_pid_path)
+        if existing is not None and is_running(existing):
+            self._send_json(200, {
+                "ok": False,
+                "message": f"a backfill is already running (pid {existing})",
+            })
+            return
+
         _save_setting(self.db_path, "backfill_days", str(days))
         # Fire and forget: the request must not block on a job that can run
         # for minutes and talks to the live network.
@@ -1746,26 +1896,50 @@ class DashboardHandler(BaseHTTPRequestHandler):
         # which is the frozen corpus the evaluation set is built from, and a
         # backfill appends to it.
         out_path = _REPO_ROOT / "data" / "backfill_latest.jsonl"
-        self.spawn_fn(
+        proc = self.spawn_fn(
             [sys.executable, str(_BACKFILL_SCRIPT), "--days", str(days),
              "--db", str(self.db_path), "--out", str(out_path)],
             cwd=str(_REPO_ROOT),
         )
+        write_pid(self.backfill_pid_path, proc.pid)
         self._send_json(200, {"ok": True, "message": f"backfill started for {days} day(s)", "backfill_days": days})
 
     def _handle_settings(self) -> None:
         form = self._read_form()
         result: dict[str, object] = {"ok": True}
+        # Say when the value saved is not the value asked for. This used to
+        # answer {"ok": true} with the old number after silently discarding
+        # the input, so a typo looked like a successful change.
+        notes = []
         if "interval" in form:
             stored = _get_setting_int(self.db_path, "poll_interval_seconds", _DEFAULT_INTERVAL_SECONDS)
-            interval = max(10, _parse_int(form.get("interval"), stored))
+            raw = str(form.get("interval", "")).strip()
+            interval = _clamp_interval(raw, stored)
+            if raw != str(interval):
+                if _parse_int(raw, None) is None:
+                    notes.append(f"'{raw}' is not a number, so the poll interval "
+                                 f"is unchanged at {interval}s")
+                else:
+                    notes.append(f"poll interval set to {interval}s, the nearest "
+                                 f"allowed value between {_MIN_INTERVAL_SECONDS} "
+                                 f"and {_MAX_INTERVAL_SECONDS}")
             _save_setting(self.db_path, "poll_interval_seconds", str(interval))
             result["poll_interval_seconds"] = interval
         if "backfill_days" in form:
             stored_days = _get_setting_int(self.db_path, "backfill_days", _DEFAULT_BACKFILL_DAYS)
-            days = max(1, _parse_int(form.get("backfill_days"), stored_days))
+            raw_days = str(form.get("backfill_days", "")).strip()
+            days = max(1, min(_MAX_BACKFILL_DAYS, _parse_int(raw_days, stored_days)))
+            if raw_days != str(days):
+                if _parse_int(raw_days, None) is None:
+                    notes.append(f"'{raw_days}' is not a number, so the backfill "
+                                 f"window is unchanged at {days} day(s)")
+                else:
+                    notes.append(f"backfill window set to {days} day(s), the nearest "
+                                 f"allowed value")
             _save_setting(self.db_path, "backfill_days", str(days))
             result["backfill_days"] = days
+        if notes:
+            result["message"] = ". ".join(notes)
         self._send_json(200, result)
 
     def _handle_lexicon(self) -> None:

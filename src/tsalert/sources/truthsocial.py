@@ -72,7 +72,14 @@ class TruthSocialApiSource:
         if since_id is not None:
             params["min_id"] = since_id
         data = self._request(params)
-        posts = self._parse_page(data)
+        # _parse_page raises outside _request's own except SourceError, so
+        # without this the health detail still read "ok" after a schema
+        # change had just failed the poll.
+        try:
+            posts = self._parse_page(data)
+        except SourceError as exc:
+            self._last_error = str(exc)
+            raise
         posts.sort(key=lambda p: id_sort_key(p.id))
         self._record_success()
         return posts
@@ -83,7 +90,14 @@ class TruthSocialApiSource:
         if before_id is not None:
             params["max_id"] = before_id
         data = self._request(params)
-        posts = self._parse_page(data)
+        # _parse_page raises outside _request's own except SourceError, so
+        # without this the health detail still read "ok" after a schema
+        # change had just failed the poll.
+        try:
+            posts = self._parse_page(data)
+        except SourceError as exc:
+            self._last_error = str(exc)
+            raise
         posts.sort(key=lambda p: id_sort_key(p.id), reverse=True)
         self._record_success()
         return posts
@@ -141,7 +155,11 @@ class TruthSocialApiSource:
             )
 
     def _handle_response(self, response: Any) -> list[dict]:
-        status = response.status_code
+        status = getattr(response, "status_code", None)
+        if not isinstance(status, int):
+            raise TransientSourceError(
+                f"response had no usable status ({type(response).__name__})"
+            )
 
         if status == 429:
             retry_after = self._parse_retry_after(response)

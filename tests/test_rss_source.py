@@ -89,3 +89,33 @@ def test_item_missing_original_id_is_skipped_not_given_a_bogus_id():
 
     assert [p.id for p in posts] == ["1"]
     assert source.skipped_missing_id_count == 2
+
+
+def test_a_non_numeric_id_is_skipped_rather_than_poisoning_the_cursor():
+    """Truth Social ids are numeric, and id_sort_key ranks a non-numeric id
+    above every numeric one. This mirror filters since_id on the client, so
+    the moment such an id became last_seen_post_id the filter excluded every
+    real post after it. The cursor lives in the store, so a restart did not
+    clear it: ingestion from the mirror stopped dead and stayed stopped.
+    """
+    feed = """<?xml version="1.0"?>
+<rss xmlns:truth="https://truthsocial.com/ns"><channel>
+  <item>
+    <truth:originalId>post-abc</truth:originalId>
+    <truth:originalUrl>https://truthsocial.com/a</truth:originalUrl>
+    <description>Apple stock is up</description>
+    <pubDate>Mon, 25 Aug 2026 10:00:00 +0000</pubDate>
+  </item>
+  <item>
+    <truth:originalId>117000000000000001</truth:originalId>
+    <truth:originalUrl>https://truthsocial.com/b</truth:originalUrl>
+    <description>Buy Nvidia now</description>
+    <pubDate>Mon, 25 Aug 2026 11:00:00 +0000</pubDate>
+  </item>
+</channel></rss>"""
+
+    source = _source(feed)
+    posts = source.fetch_latest()
+
+    assert [p.id for p in posts] == ["117000000000000001"]
+    assert source.skipped_missing_id_count == 1

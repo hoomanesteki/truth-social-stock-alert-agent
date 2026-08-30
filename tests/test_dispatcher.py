@@ -634,3 +634,35 @@ def test_telegram_channel_takes_the_configured_timeout():
 
     assert TelegramChannel("t", "c").timeout == 20
     assert TelegramChannel("t", "c", timeout=3).timeout == 3
+
+
+def test_recovery_is_not_starved_by_posts_too_old_to_send(tmp_path):
+    """Posts past the age gate are never written to the alerts table, so they
+    matched undelivered_stock_posts on every pass. Ordered oldest first, they
+    owned the whole limit, and a genuinely recent post behind them was never
+    recovered. Sixty aged-out posts starved one fresh one indefinitely.
+    """
+    from datetime import timedelta, timezone
+    from datetime import datetime as _dt
+
+    now = _dt.now(timezone.utc)
+    channel = FakeChannel("console")
+
+    with Store(tmp_path / "starve2.db") as store:
+        for i in range(60):
+            old = replace(make_post(f"o{i:03d}"), created_at=now - timedelta(days=30))
+            store.upsert_post(old)
+            store.save_detection(make_detection(old.id))
+        fresh = replace(make_post("fresh1"), created_at=now - timedelta(minutes=2))
+        store.upsert_post(fresh)
+        store.save_detection(make_detection(fresh.id))
+
+        dispatcher = AlertDispatcher(
+            [channel], store, sleep=no_sleep, max_alert_age=timedelta(hours=24)
+        )
+        for _ in range(3):
+            dispatcher.recover_undelivered()
+
+        assert len(channel.sent) == 1
+        rows = store._conn.execute("SELECT post_id FROM alerts").fetchall()
+        assert [r["post_id"] for r in rows] == ["fresh1"]

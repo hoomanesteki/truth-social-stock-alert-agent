@@ -10,6 +10,13 @@ class ConfigError(ValueError):
     """A setting is missing or does not make sense."""
 
 
+# Nothing here is a duration longer than a day, and every one of them ends up
+# in a timedelta or a time.sleep, both of which raise OverflowError on a large
+# enough number. A pasted digit string used to reach those and kill whatever
+# was holding it.
+_MAX_SETTING_SECONDS = 86400
+
+
 def _positive_int(name: str, raw, default: int) -> int:
     """Read a setting that has to be a positive whole number.
 
@@ -17,6 +24,11 @@ def _positive_int(name: str, raw, default: int) -> int:
     against someone else's server. The throttle and the hourly cap still
     bound that, but a typo in .env should be caught here rather than left
     for a downstream guard to absorb.
+
+    The upper bound is here for the same reason: these values are seconds,
+    minutes or hours, and one big enough to overflow a timedelta is a typo,
+    not a request. Rejecting it while the process is still starting beats
+    raising OverflowError from inside the poll loop.
     """
     if raw is None:
         return default
@@ -26,6 +38,10 @@ def _positive_int(name: str, raw, default: int) -> int:
         raise ConfigError(f"{name} must be a whole number, got {raw!r}") from None
     if value <= 0:
         raise ConfigError(f"{name} must be greater than zero, got {value}")
+    if value > _MAX_SETTING_SECONDS:
+        raise ConfigError(
+            f"{name} must be at most {_MAX_SETTING_SECONDS} (a day), got {value}"
+        )
     return value
 
 

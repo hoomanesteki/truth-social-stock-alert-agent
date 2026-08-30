@@ -384,7 +384,12 @@ def test_ingestion_state_is_empty_before_the_agent_has_run(tmp_path):
         store.init_schema()
         state = dashboard.ingestion_state(store)
 
-    assert state == {"active": "", "detail": "", "ok": False, "last_transition": None}
+    assert state["active"] == ""
+    assert state["last_transition"] is None
+    assert state["ok"] is False
+    # Both real sources are still described, none of them marked live.
+    assert [src["key"] for src in state["sources"]] == ["truthsocial_api", "trumpstruth_rss"]
+    assert not any(src["active"] for src in state["sources"])
 
 
 def test_ingestion_state_reads_what_the_agent_recorded(tmp_path):
@@ -395,20 +400,20 @@ def test_ingestion_state_reads_what_the_agent_recorded(tmp_path):
     db = tmp_path / "recorded.db"
     with Store(db) as store:
         store.init_schema()
-        store.set_state("active_source", "rss")
+        store.set_state("active_source", "trumpstruth_rss")
         store.set_state("source_detail", "ok")
         store.set_state("source_ok", "1")
         store.set_state("last_source_transition", _json.dumps({
             "at": "2026-08-29T12:00:00+00:00",
-            "from": "truthsocial",
-            "to": "rss",
+            "from": "truthsocial_api",
+            "to": "trumpstruth_rss",
             "reason": "primary failed: cloudflare 403",
         }))
         state = dashboard.ingestion_state(store)
 
-    assert state["active"] == "rss"
+    assert state["active"] == "trumpstruth_rss"
     assert state["ok"] is True
-    assert state["last_transition"]["from"] == "truthsocial"
+    assert state["last_transition"]["from"] == "truthsocial_api"
     assert "cloudflare" in state["last_transition"]["reason"]
 
 
@@ -416,9 +421,107 @@ def test_a_corrupt_transition_record_does_not_break_the_page(tmp_path):
     db = tmp_path / "corrupt.db"
     with Store(db) as store:
         store.init_schema()
-        store.set_state("active_source", "truthsocial")
+        store.set_state("active_source", "truthsocial_api")
         store.set_state("last_source_transition", "{not json")
         state = dashboard.ingestion_state(store)
 
-    assert state["active"] == "truthsocial"
+    assert state["active"] == "truthsocial_api"
     assert state["last_transition"] is None
+
+
+def test_the_source_roster_uses_the_names_the_code_really_uses():
+    """The page had its own copy of the source names and they were wrong.
+
+    The classes call themselves truthsocial_api and trumpstruth_rss; the
+    JavaScript looked for "truthsocial" and "rss". No card ever matched, so
+    nothing showed as live, the live error detail was unreachable exactly when
+    it mattered, and a real mirror run rendered as a replay. The roster is
+    built from the classes' own name attributes now, so this cannot drift
+    again without the import failing.
+    """
+    from tsalert.sources.rss_mirror import TrumpsTruthRssSource
+    from tsalert.sources.truthsocial import TruthSocialApiSource
+
+    assert TruthSocialApiSource.name == "truthsocial_api"
+    assert TrumpsTruthRssSource.name == "trumpstruth_rss"
+
+
+def test_a_live_mirror_run_marks_the_mirror_not_a_replay(tmp_path):
+    db = tmp_path / "mirror.db"
+    with Store(db) as store:
+        store.init_schema()
+        store.set_state("active_source", "trumpstruth_rss")
+        store.set_state("source_detail", "ok")
+        state = dashboard.ingestion_state(store)
+
+    keys = [src["key"] for src in state["sources"]]
+    assert keys == ["truthsocial_api", "trumpstruth_rss"]  # no replay card
+    live = [src for src in state["sources"] if src["active"]]
+    assert len(live) == 1
+    assert live[0]["key"] == "trumpstruth_rss"
+    assert live[0]["role"] == "Fallback"
+
+
+def test_a_replay_run_gets_its_own_card(tmp_path):
+    db = tmp_path / "replay.db"
+    with Store(db) as store:
+        store.init_schema()
+        store.set_state("active_source", "demo")
+        state = dashboard.ingestion_state(store)
+
+    assert [src["key"] for src in state["sources"]][0] == "demo"
+    assert [src["active"] for src in state["sources"]] == [True, False, False]
+
+
+def test_is_running_refuses_pids_that_signal_more_than_one_process():
+    """0 means "my whole process group" and -1 means "everything I may
+    signal". Both answer os.kill(pid, 0) with success, so a pid file holding
+    0 made the page report RUNNING and then made Stop SIGTERM the dashboard
+    itself.
+    """
+    assert dashboard.is_running(0) is False
+    assert dashboard.is_running(-1) is False
+    assert dashboard.is_running(-4242) is False
+    assert dashboard.is_running(10 ** 19) is False  # larger than pid_t
+
+
+def test_stop_will_not_signal_a_process_that_is_not_the_agent():
+    """A pid file outlives the process it names and pids get reused."""
+    import os
+    import subprocess
+
+    stranger = subprocess.Popen(["/bin/sleep", "30"])
+    try:
+        assert dashboard.looks_like_our_agent(stranger.pid) is False
+        assert dashboard.looks_like_our_agent(os.getpid()) is False
+    finally:
+        stranger.kill()
+        stranger.wait()
+
+
+def test_an_interval_too_large_for_a_timedelta_is_refused(tmp_path):
+    """build_state puts this into timedelta() and the agent into time.sleep,
+    and both raise OverflowError. The page died with no response at all, the
+    value was already persisted, and Stop was unreachable."""
+    assert dashboard._clamp_interval("100000000000000000000", 90) == dashboard._MAX_INTERVAL_SECONDS
+    assert dashboard._clamp_interval("-5", 90) == dashboard._MIN_INTERVAL_SECONDS
+    assert dashboard._clamp_interval("abc", 90) == 90
+    assert dashboard._clamp_interval("120", 90) == 120
+
+
+def test_a_lexicon_with_no_rows_is_refused():
+    """A correct header with nothing under it saved cleanly and left the
+    detector with an empty lexicon: every alias and bare ticker match gone,
+    and nothing said so."""
+    header = ",".join(dashboard._LEXICON_HEADER)
+    assert dashboard.validate_lexicon_csv(header) is not None
+    assert dashboard.validate_lexicon_csv(header + "\nAAPL,Apple Inc.,Apple,low,,equity,") is None
+    assert dashboard.validate_lexicon_csv(header + "\nAAPL,Apple Inc.") is not None
+    assert dashboard.validate_lexicon_csv(header + "\nAAPL,,Apple,low,,equity,") is not None
+
+
+def test_the_real_lexicon_still_passes_validation():
+    """The guard must not reject the file the project ships with."""
+    from pathlib import Path as _Path
+    text = (_Path(__file__).parent.parent / "data" / "lexicon" / "tickers.csv").read_text()
+    assert dashboard.validate_lexicon_csv(text) is None

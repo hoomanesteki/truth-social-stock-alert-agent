@@ -189,7 +189,17 @@ class AlertDispatcher:
                 continue
             if self.store.is_channel_paused(channel.name):
                 continue
-            for post_id in self.store.undelivered_stock_posts(channel.name):
+            # The age floor is pushed into the query rather than applied after
+            # it. Filtering afterwards still let posts too old to send occupy
+            # the whole limit, forever, because nothing ever writes an alerts
+            # row for them, so they matched again on every pass and a recent
+            # post behind them was never reached.
+            floor = None
+            if self.max_alert_age is not None:
+                floor = datetime.now(timezone.utc) - self.max_alert_age
+            for post_id in self.store.undelivered_stock_posts(
+                channel.name, not_older_than=floor
+            ):
                 loaded = self.store.get_post_with_detection(post_id)
                 if loaded is None:
                     continue
@@ -359,6 +369,23 @@ class AlertDispatcher:
                 return False, attempt, str(exc), True
             except TransientSourceError as exc:
                 error = str(exc)
+                if attempt >= budget:
+                    return False, attempt, error, False
+            except Exception as exc:
+                # Anything a channel raises that is not one of the two
+                # SourceError types used to escape this method, the poll loop
+                # and run() itself, and because the claim row was left
+                # pending, retry_failed hit the same channel first on restart
+                # and died again. ConsoleChannel.send is print(), always
+                # configured and second in the list, so a closed terminal or
+                # a dropped ssh session was enough: BrokenPipeError, or
+                # ValueError on a closed stream.
+                #
+                # Treated as transient. An unexpected exception is a bug
+                # rather than a verdict, and the cost of guessing wrong is a
+                # retry, where the cost of the old behaviour was the agent.
+                error = f"{type(exc).__name__}: {exc}"
+                logger.exception("channel %s raised an unexpected error", channel.name)
                 if attempt >= budget:
                     return False, attempt, error, False
                 retry_after = sanitize_retry_after(getattr(exc, "retry_after", None))

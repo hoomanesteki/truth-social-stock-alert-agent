@@ -19,6 +19,7 @@ from tsalert.store import Store
 FIXTURES_DIR = Path(__file__).resolve().parent / "fixtures"
 DEMO_FIXTURE = FIXTURES_DIR / "demo_statuses.json"
 PAGE1_FIXTURE = FIXTURES_DIR / "statuses_page1.json"
+PAGE2_FIXTURE = FIXTURES_DIR / "statuses_page2.json"
 LEXICON_PATH = Path(__file__).resolve().parent.parent / "data" / "lexicon" / "tickers.csv"
 
 # Every post in demo_statuses.json trips the real rule detector (confirmed by
@@ -683,3 +684,27 @@ def test_a_failing_health_probe_does_not_break_the_poll(tmp_path):
     runner = make_runner(source, FakeDispatcher(), store)
 
     assert runner.poll_once() == len(DEMO_IDS)
+
+
+def test_the_fixture_source_hands_back_its_oldest_posts_first(tmp_path):
+    """Taking the newest slice advances the cursor past the oldest ones and
+    the next poll's since_id filter then excludes them forever. With 40
+    recorded posts and limit=20, half the corpus was never ingested."""
+    import json as _json
+
+    combined = tmp_path / "all.json"
+    combined.write_text(_json.dumps(
+        _json.loads(PAGE1_FIXTURE.read_text()) + _json.loads(PAGE2_FIXTURE.read_text())
+    ))
+    available = len(_json.loads(combined.read_text()))
+
+    source = FixtureSource([combined])
+    seen, cursor = set(), None
+    for _ in range(4):
+        batch = source.fetch_latest(since_id=cursor, limit=20)
+        if not batch:
+            break
+        seen.update(p.id for p in batch)
+        cursor = max((p.id for p in batch), key=lambda i: (len(i), i))
+
+    assert len(seen) == available

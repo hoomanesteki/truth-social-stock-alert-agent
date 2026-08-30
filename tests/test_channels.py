@@ -368,3 +368,41 @@ def test_a_paused_backlog_does_not_block_another_channels_retries(tmp_path):
 
         assert ("t001", "telegram") in retryable
         assert all(channel != "discord" for _, channel in retryable)
+
+
+def test_an_unexpected_channel_exception_does_not_kill_the_agent(tmp_path):
+    """ConsoleChannel.send is print(), always configured and second in the
+    list. A closed terminal or a dropped ssh session raises BrokenPipeError,
+    which is neither SourceError type, so it escaped the dispatcher, the poll
+    loop and run() itself. The claim row was left pending and retry_failed
+    runs first on the next start, so restarting crash-looped on it.
+    """
+    from tsalert.alerts.dispatcher import AlertDispatcher
+    from tsalert.store import Store
+    from test_dispatcher import FakeChannel, make_detection, make_post, no_sleep
+
+    class BrokenPipeChannel:
+        name = "console"
+
+        def is_configured(self):
+            return True
+
+        def send(self, text):
+            raise BrokenPipeError(32, "Broken pipe")
+
+    post = make_post()
+    good = FakeChannel("file")
+    with Store(tmp_path / "pipe.db") as store:
+        store.upsert_post(post)
+        dispatcher = AlertDispatcher([BrokenPipeChannel(), good], store, sleep=no_sleep)
+
+        results = dispatcher.dispatch(post, make_detection(post.id))
+
+        by_channel = {r.channel: r for r in results}
+        assert by_channel["console"].ok is False
+        assert by_channel["file"].ok is True
+        assert len(good.sent) == 1
+        row = store._conn.execute(
+            "SELECT status FROM alerts WHERE channel='console'"
+        ).fetchone()
+        assert row["status"] == "failed"  # retryable, not a crash loop

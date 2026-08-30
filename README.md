@@ -34,7 +34,7 @@ Every failure below was tested by forcing it, not just handled in principle.
 
 | Failure | What happens |
 | --- | --- |
-| Primary API blocked or erroring | Circuit breaker opens after 3 consecutive failures and the RSS mirror takes over. It probes the primary again after a cooldown |
+| Primary API blocked or erroring | Each poll retries the primary a few times, then counts one failure. After 3 such polls the circuit breaker opens and the RSS mirror takes over, and the primary is probed again after a cooldown. Both sources return the same status ids, so a switch cannot re-alert |
 | Rate limited with `Retry-After` | Honoured inside the retry and again between polls, so the next request waits as long as the server asked |
 | Endpoint changes shape | A page more than half unparseable raises rather than returning an empty list, so a silent schema change is loud |
 | Polls succeed but nothing arrives | `no_new_posts` heartbeat fires. State is on disk, so a restart cannot reset the clock |
@@ -282,6 +282,6 @@ src/tsalert/
 scripts/                  backfill, eval set construction, labeling, evaluation, latency,
                           dashboard (bonus: local control panel on http.server)
 data/                     the 45 day archive, the lexicon, the evaluation set
-tests/                    280 tests, offline, against recorded fixtures
+tests/                    293 tests, offline, against recorded fixtures
 ```
 

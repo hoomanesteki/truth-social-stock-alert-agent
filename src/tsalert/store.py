@@ -346,7 +346,8 @@ class Store:
         rows = self._conn.execute(sql, params).fetchall()
         return [(row["post_id"], row["channel"]) for row in rows]
 
-    def undelivered_stock_posts(self, channel: str, limit: int = 50) -> list[str]:
+    def undelivered_stock_posts(self, channel: str, limit: int = 50,
+                                not_older_than: datetime | None = None) -> list[str]:
         """Stock related post ids with no alerts row at all for this channel.
 
         dedup and delivery are separate concerns on separate schedules.
@@ -365,13 +366,28 @@ class Store:
         alert_eligible keeps priming and backfill out of it. Those store real
         detections for posts nobody wants an alert about, and without the flag
         this query cannot tell them from a post that crashed before delivery.
+
+        not_older_than drops posts the caller would refuse to alert on
+        anyway. Without it they were selected forever: too old to send, never
+        written to the alerts table, and so still matching this query on
+        every pass. Ordered oldest first, they owned the whole limit, and a
+        genuinely recent post sitting behind them was never recovered. Sixty
+        aged-out posts were enough to starve one fresh one indefinitely.
         """
+        clauses = [
+            "is_stock_related = 1",
+            "COALESCE(alert_eligible, 1) = 1",
+            "id NOT IN (SELECT post_id FROM alerts WHERE channel = ?)",
+        ]
+        params: list[Any] = [channel]
+        if not_older_than is not None:
+            clauses.append("created_at >= ?")
+            params.append(not_older_than.isoformat())
+        params.append(limit)
         rows = self._conn.execute(
-            "SELECT id FROM posts WHERE is_stock_related = 1 "
-            "AND COALESCE(alert_eligible, 1) = 1 "
-            "AND id NOT IN (SELECT post_id FROM alerts WHERE channel = ?) "
-            "ORDER BY created_at ASC LIMIT ?",
-            (channel, limit),
+            "SELECT id FROM posts WHERE " + " AND ".join(clauses)
+            + " ORDER BY created_at ASC LIMIT ?",
+            params,
         ).fetchall()
         return [row["id"] for row in rows]
 

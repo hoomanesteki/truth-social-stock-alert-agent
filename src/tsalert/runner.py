@@ -110,13 +110,13 @@ class AgentRunner:
         since_id = self._read_since_id()
 
         try:
-            # A single transient blip (one dropped connection, one 5xx) is
-            # worth a few seconds of retry here rather than costing a whole
-            # poll interval, which can be minutes under AdaptiveInterval.
-            posts = with_retries(
-                lambda: self.source.fetch_latest(since_id=since_id),
-                sleep=self.sleep,
-            )
+            # No with_retries here any more. FailoverSource retries the
+            # primary internally, and retrying on top of that meant one poll
+            # spent the circuit breaker's whole threshold, so a single blip
+            # failed over to the mirror inside that one poll. A source that
+            # does not do its own retrying (the replay sources) has nothing
+            # to retry against.
+            posts = self.source.fetch_latest(since_id=since_id)
         except TransientSourceError as exc:
             retry_after = getattr(exc, "retry_after", None)
             if retry_after is not None:
@@ -222,7 +222,13 @@ class AgentRunner:
         )
         self.store.set_state("active_source", active)
         transition = getattr(self.source, "last_transition", None)
-        if transition is not None:
+        if transition is None:
+            # Cleared, not left alone. A restarted agent starts with no
+            # transition, and leaving the old record in place made the page
+            # render the previous process's failover as if it had just
+            # happened.
+            self.store.set_state("last_source_transition", "")
+        else:
             self.store.set_state(
                 "last_source_transition",
                 json.dumps({
@@ -234,7 +240,12 @@ class AgentRunner:
             )
         try:
             health = self.source.health()
-        except Exception:  # a health probe must never break a poll
+        except Exception:
+            # A health probe must never break a poll, but returning here left
+            # the previous poll's detail on display next to a freshly updated
+            # active source, which reads as current. Say it is unknown.
+            self.store.set_state("source_detail", "health unavailable")
+            self.store.set_state("source_ok", "0")
             return
         self.store.set_state("source_detail", str(getattr(health, "detail", "")))
         self.store.set_state("source_ok", "1" if getattr(health, "ok", False) else "0")

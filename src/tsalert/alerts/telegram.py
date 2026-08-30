@@ -61,7 +61,15 @@ class TelegramChannel:
         self._handle_response(response)
 
     def _handle_response(self, response: Any) -> None:
-        status = response.status_code
+        status = getattr(response, "status_code", None)
+        if not isinstance(status, int):
+            # Same guard the Discord channel has. A transport returning
+            # something unexpected is a bug here, not a verdict from
+            # Telegram, and an AttributeError from this line would have
+            # escaped as an unhandled exception.
+            raise TransientSourceError(
+                f"telegram response had no usable status ({type(response).__name__})"
+            )
         if status == 200:
             return
         if status == 429:

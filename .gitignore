@@ -230,3 +230,5 @@ data/llm_detector_cache.jsonl
 # so it differs per run and is not worth versioning.
 data/alerts.jsonl
 logs/*.jsonl
+data/backfill.pid
+data/agent.pid
