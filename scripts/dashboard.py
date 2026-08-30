@@ -20,6 +20,7 @@ import csv
 import html
 import io
 import json
+import logging
 import os
 import re
 import signal
@@ -45,6 +46,8 @@ from tsalert.monitor import HealthMonitor  # noqa: E402
 from tsalert.sources.rss_mirror import TrumpsTruthRssSource  # noqa: E402
 from tsalert.sources.truthsocial import TruthSocialApiSource  # noqa: E402
 from tsalert.store import Store  # noqa: E402
+
+logger = logging.getLogger(__name__)
 
 _DEFAULT_DB = "data/agent.db"
 _DEFAULT_LEXICON = _REPO_ROOT / "data" / "lexicon" / "tickers.csv"
@@ -378,7 +381,7 @@ def channel_health(db_path: str) -> list[dict]:
         "discord": bool(config.discord_webhook_url),
         "telegram": bool(config.telegram_bot_token and config.telegram_chat_id),
     }
-    with Store(db_path) as store:
+    with Store(db_path, migrate=False) as store:
         counts = store.channel_stats()
         paused = {name: store.is_channel_paused(name) for name, _, _ in _CHANNEL_SPECS}
 
@@ -460,7 +463,7 @@ def ingestion_state(store: Store) -> dict:
 
 
 def build_state(db_path: str, pid_path: Path, metrics_path: Path, ticker_filter: str | None) -> dict:
-    with Store(db_path) as store:
+    with Store(db_path, migrate=False) as store:
         stats = store.stats()
         monitor = HealthMonitor(store)
         health = monitor.status()
@@ -1725,12 +1728,12 @@ def _parse_int(value: object, default):
 
 
 def _get_setting_int(db_path: str, key: str, default: int) -> int:
-    with Store(db_path) as store:
+    with Store(db_path, migrate=False) as store:
         return _int_or(store.get_state(key), default)
 
 
 def _save_setting(db_path: str, key: str, value: str) -> None:
-    with Store(db_path) as store:
+    with Store(db_path, migrate=False) as store:
         store.set_state(key, value)
 
 
@@ -1748,16 +1751,19 @@ class DashboardHandler(BaseHTTPRequestHandler):
     server_version = "TSAlertDashboard/2.0"
 
     def do_GET(self) -> None:
-        parsed = urlparse(self.path)
-        if parsed.path == "/":
-            self._send_html(render_page(self._build_state(parsed)))
-        elif parsed.path == "/api/state":
-            self._send_json(200, self._build_state(parsed))
-        elif parsed.path == "/lexicon":
-            text = self.lexicon_path.read_text(encoding="utf-8") if self.lexicon_path.exists() else ""
-            self._send_json(200, {"text": text})
-        else:
-            self._send_text(404, "not found")
+        def _run() -> None:
+            parsed = urlparse(self.path)
+            if parsed.path == "/":
+                self._send_html(render_page(self._build_state(parsed)))
+            elif parsed.path == "/api/state":
+                self._send_json(200, self._build_state(parsed))
+            elif parsed.path == "/lexicon":
+                text = self.lexicon_path.read_text(encoding="utf-8") if self.lexicon_path.exists() else ""
+                self._send_json(200, {"text": text})
+            else:
+                self._send_text(404, "not found")
+
+        self._guarded(_run)
 
     def do_POST(self) -> None:
         parsed = urlparse(self.path)
@@ -1773,7 +1779,26 @@ class DashboardHandler(BaseHTTPRequestHandler):
         if handler is None:
             self._send_text(404, "not found")
             return
-        handler()
+        self._guarded(handler)
+
+    def _guarded(self, fn) -> None:
+        """Answer every request, even a broken one.
+
+        BaseHTTPRequestHandler responds to an unhandled exception by closing
+        the connection with nothing at all, so the browser sees the whole
+        dashboard as dead rather than one control as broken. That is how a
+        single bad config value, an out of range number and a locked database
+        each took the entire page down. A 500 with the reason is recoverable;
+        silence is not.
+        """
+        try:
+            fn()
+        except Exception as exc:
+            logger.exception("dashboard request failed: %s", self.path)
+            try:
+                self._send_json(500, {"ok": False, "message": f"{type(exc).__name__}: {exc}"})
+            except Exception:
+                pass
 
     def _build_state(self, parsed) -> dict:
         query = parse_qs(parsed.query)
@@ -1818,7 +1843,7 @@ class DashboardHandler(BaseHTTPRequestHandler):
             )
             return
         paused = raw == "1"
-        with Store(self.db_path) as store:
+        with Store(self.db_path, migrate=False) as store:
             store.set_channel_paused(name, paused)
         word = "paused" if paused else "resumed"
         note = ""
@@ -2009,6 +2034,13 @@ def make_server(
     metrics_path: Path = _DEFAULT_METRICS,
     spawn_fn=None,
 ) -> HTTPServer:
+    # Once, here, rather than on every request. Everything else opens the
+    # database with migrate=False, so the schema has to exist before the
+    # first read, and pointing the dashboard at a path that has never been
+    # used is a normal thing to do. In make_server rather than main() so
+    # every entry point gets it, tests included.
+    with Store(db_path) as store:
+        store.init_schema()
     # A per-server subclass instead of module globals, so more than one
     # server (as in tests) can point at different databases, pid files and
     # spawn functions at once.

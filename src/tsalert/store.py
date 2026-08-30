@@ -65,14 +65,21 @@ _LATENCY_COLUMNS = {"published_at", "fetched_at", "detected_at", "delivered_at"}
 
 
 class Store:
-    def __init__(self, path: str | Path) -> None:
+    def __init__(self, path: str | Path, migrate: bool = True) -> None:
         self.path = Path(path)
         self.path.parent.mkdir(parents=True, exist_ok=True)
         self._conn = sqlite3.connect(str(self.path))
         self._conn.row_factory = sqlite3.Row
+        # A reader does not need to create tables or run migrations. The
+        # dashboard opens several of these per request and refreshes every
+        # ten seconds, which meant running DDL against the live agent's
+        # database a few times a minute for no reason, and a "database is
+        # locked" from that would take the page down.
+        self._migrate = migrate
 
     def __enter__(self) -> "Store":
-        self.init_schema()
+        if self._migrate:
+            self.init_schema()
         return self
 
     def __exit__(self, exc_type: Any, exc: Any, tb: Any) -> None:

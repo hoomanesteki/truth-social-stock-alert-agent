@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import os
+import sqlite3
 import sys
 import threading
 from contextlib import contextmanager
@@ -525,3 +526,55 @@ def test_the_real_lexicon_still_passes_validation():
     from pathlib import Path as _Path
     text = (_Path(__file__).parent.parent / "data" / "lexicon" / "tickers.csv").read_text()
     assert dashboard.validate_lexicon_csv(text) is None
+
+
+def test_a_failing_request_still_gets_a_response(tmp_path, monkeypatch):
+    """BaseHTTPRequestHandler answers an unhandled exception by closing the
+    connection with nothing at all, so the browser sees the whole dashboard
+    as dead rather than one control as broken. A bad config value, an out of
+    range number and a locked database each took the entire page down that
+    way. A 500 with the reason is recoverable; silence is not.
+    """
+    import json as _json
+    import urllib.error
+    import urllib.request
+
+    db = tmp_path / "guard.db"
+    server = dashboard.make_server("127.0.0.1", 0, str(db), tmp_path / "lex.csv")
+    port = server.server_address[1]
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    try:
+        # Force the state builder to blow up the way a locked database would.
+        monkeypatch.setattr(
+            dashboard, "build_state",
+            lambda *a, **k: (_ for _ in ()).throw(sqlite3.OperationalError("database is locked")),
+        )
+        try:
+            urllib.request.urlopen(f"http://127.0.0.1:{port}/api/state", timeout=5)
+            raise AssertionError("expected a 500")
+        except urllib.error.HTTPError as exc:
+            assert exc.code == 500
+            body = _json.loads(exc.read())
+            assert body["ok"] is False
+            assert "database is locked" in body["message"]
+    finally:
+        server.shutdown()
+        server.server_close()
+
+
+def test_the_dashboard_creates_the_schema_it_then_reads(tmp_path):
+    """Reads open the database with migrate=False, so pointing the dashboard
+    at a path that has never been used has to still work."""
+    db = tmp_path / "brandnew.db"
+    assert not db.exists()
+
+    server = dashboard.make_server("127.0.0.1", 0, str(db), tmp_path / "lex.csv")
+    try:
+        assert db.exists()
+        with Store(db, migrate=False) as store:
+            tables = {r[0] for r in store._conn.execute(
+                "SELECT name FROM sqlite_master WHERE type='table'")}
+        assert {"posts", "alerts", "agent_state", "latency"} <= tables
+    finally:
+        server.server_close()

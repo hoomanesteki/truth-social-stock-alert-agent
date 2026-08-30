@@ -283,6 +283,6 @@ src/tsalert/
 scripts/                  backfill, eval set construction, labeling, evaluation, latency,
                           dashboard (bonus: local control panel on http.server)
 data/                     the 45 day archive, the lexicon, the evaluation set
-tests/                    293 tests, offline, against recorded fixtures
+tests/                    295 tests, offline, against recorded fixtures
 ```
 
